@@ -3,6 +3,10 @@
 db
 logs
 out
+# Runtime-generated subscription templates; keep the tracked default templates.
+template/*
+!template/clash.yaml
+!template/surge.conf
 sublink_amd64
 sublink_arm64
 sublink.exe
