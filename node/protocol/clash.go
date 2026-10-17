@@ -403,7 +403,7 @@ func EncodeClash(urls []Urls, config OutputConfig) ([]byte, error) {
 	}
 
 	// 生成Clash配置文件
-	return DecodeClash(proxys, config.Clash, config.CustomProxyGroups)
+	return decodeClashWithOptions(proxys, config.Clash, [][]CustomProxyGroup{config.CustomProxyGroups}, config.ExcludedProxyNames)
 }
 
 // DecodeClash 用于解析 Clash 配置文件并合并新节点
@@ -411,6 +411,10 @@ func EncodeClash(urls []Urls, config OutputConfig) ([]byte, error) {
 // yamlfile: 模板文件路径或 URL
 // customGroups: 自定义代理组列表（可选，由链式代理规则生成）
 func DecodeClash(proxys []Proxy, yamlfile string, customGroups ...[]CustomProxyGroup) ([]byte, error) {
+	return decodeClashWithOptions(proxys, yamlfile, customGroups, nil)
+}
+
+func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]CustomProxyGroup, excludedNames []string) ([]byte, error) {
 	// 读取 YAML 文件
 	var data []byte
 	var err error
@@ -460,11 +464,16 @@ func DecodeClash(proxys []Proxy, yamlfile string, customGroups ...[]CustomProxyG
 		// 如果 "proxies" 键不存在，创建一个新的切片
 		proxies = []any{}
 	}
-	// 定义一个代理列表名字
+	// 定义一个代理列表名字。前置节点保留在 proxies 中，但不加入自动生成的代理组。
 	ProxiesNameList := []string{}
-	// 添加新代理
+	excludedProxyNames := make(map[string]bool, len(excludedNames))
+	for _, name := range excludedNames {
+		excludedProxyNames[strings.TrimSpace(name)] = true
+	}
 	for _, p := range proxys {
-		ProxiesNameList = append(ProxiesNameList, p.Name)
+		if !excludedProxyNames[p.Name] {
+			ProxiesNameList = append(ProxiesNameList, p.Name)
+		}
 		proxies = append(proxies, p)
 	}
 	// proxies = append(proxies, newProxy)
@@ -541,6 +550,19 @@ func DecodeClash(proxys []Proxy, yamlfile string, customGroups ...[]CustomProxyG
 			continue
 		}
 
+		// 前置节点可以保留在 proxies 定义中供 dialer-proxy 引用，
+		// 但不应出现在任何显式节点代理组中。
+		if existingProxies, ok := proxyGroup["proxies"].([]any); ok && len(excludedProxyNames) > 0 {
+			filteredProxies := make([]any, 0, len(existingProxies))
+			for _, proxy := range existingProxies {
+				name, isName := proxy.(string)
+				if !isName || !excludedProxyNames[strings.TrimSpace(name)] {
+					filteredProxies = append(filteredProxies, proxy)
+				}
+			}
+			proxyGroup["proxies"] = filteredProxies
+		}
+
 		// 自定义代理组（由链式代理规则生成）已有自己的节点列表，跳过节点追加
 		if isCustom, ok := proxyGroup["_custom_group"].(bool); ok && isCustom {
 			// 删除内部标记，避免输出到配置文件
@@ -551,6 +573,19 @@ func DecodeClash(proxys []Proxy, yamlfile string, customGroups ...[]CustomProxyG
 
 		// include-all、use/filter 等自动匹配组应保持模板原意，不能强行展开为固定节点列表。
 		if shouldPreserveProxyGroup(proxyGroup) {
+			if len(excludedProxyNames) > 0 {
+				patternParts := make([]string, 0, len(excludedProxyNames))
+				for name := range excludedProxyNames {
+					patternParts = append(patternParts, regexp.QuoteMeta(strings.TrimSpace(name)))
+				}
+				excludedPattern := "(?:" + strings.Join(patternParts, "|") + ")"
+				if existingFilter, ok := proxyGroup["exclude-filter"].(string); ok && strings.TrimSpace(existingFilter) != "" {
+					proxyGroup["exclude-filter"] = "(?:" + existingFilter + ")|" + excludedPattern
+				} else {
+					proxyGroup["exclude-filter"] = excludedPattern
+				}
+			}
+			proxyGroups[i] = proxyGroup
 			continue
 		}
 
@@ -573,7 +608,7 @@ func DecodeClash(proxys []Proxy, yamlfile string, customGroups ...[]CustomProxyG
 		}
 
 		if hasPlaceholder {
-			// 构建新的 proxies 列表：占位符之前的元素 + 所有节点
+			// 构建新的 proxies 列表：占位符之前的元素 + 非前置节点
 			var newProxies []any
 			// 添加占位符之前的元素（组引用如 🔯 故障转移、♻️ 自动选择、DIRECT 等）
 			for j := 0; j < placeholderIndex; j++ {
@@ -595,7 +630,7 @@ func DecodeClash(proxys []Proxy, yamlfile string, customGroups ...[]CustomProxyG
 		// 原有逻辑：只有当 proxies 列表为空时才追加所有节点
 		// 如果已有 proxies（组引用如 🚀 节点选择、DIRECT 等），保持不变
 		if len(existingProxies) == 0 {
-			// 没有任何 proxies，追加所有节点
+			// 没有任何 proxies，追加非前置节点
 			var validProxies []any
 			for _, newProxy := range ProxiesNameList {
 				validProxies = append(validProxies, newProxy)

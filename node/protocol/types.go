@@ -10,6 +10,7 @@ type OutputConfig struct {
 	ReplaceServerWithHost bool               `json:"replaceServerWithHost"` // 是否使用 Host 替换服务器地址
 	HostMap               map[string]string  `json:"-"`                     // 运行时填充的 Host 映射，不序列化
 	CustomProxyGroups     []CustomProxyGroup `json:"-"`                     // 运行时填充的自定义代理组，不序列化
+	ExcludedProxyNames    []string           `json:"-"`                     // 保留代理定义但不加入自动生成的代理组
 }
 
 // CustomProxyGroup 自定义代理组（由链式代理规则生成）

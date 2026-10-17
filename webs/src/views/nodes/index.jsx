@@ -987,6 +987,10 @@ export default function NodeList() {
       showMessage(t('nodes.page.messages.nodeLinkRequired'), 'warning');
       return;
     }
+    if (!isEditNode && nodeLinks.length > 1 && nodeForm.name.trim()) {
+      showMessage(t('nodes.page.messages.customNameSingleNodeOnly', '自定义名称只能用于单个节点，请拆分后分别添加'), 'warning');
+      return;
+    }
 
     // 提取标签名称
     const tagNames = (nodeForm.tags || []).map((t) => t.name || t).join(',');
@@ -997,6 +1001,7 @@ export default function NodeList() {
         await updateNode({
           oldname: currentNode.Name,
           oldlink: currentNode.Link,
+          oldDialerProxyName: currentNode.DialerProxyName || '',
           link: processedLink,
           name: nodeForm.name.trim(),
           nameMode: nodeForm.nameMode || 'link',
@@ -1014,7 +1019,7 @@ export default function NodeList() {
           try {
             const res = await addNodes({
               link,
-              name: '',
+              name: nodeLinks.length === 1 ? nodeForm.name.trim() : '',
               dialerProxyName: nodeForm.dialerProxyName.trim(),
               group: nodeForm.group.trim(),
               tags: tagNames

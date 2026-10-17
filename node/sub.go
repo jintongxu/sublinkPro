@@ -867,9 +867,9 @@ func scheduleClashToNodeLinks(ctx context.Context, id int, proxys []protocol.Pro
 
 	var allNodeHashes map[string]bool
 	if enableCrossDedup {
-		allNodeHashes = models.GetAllNodeContentHashes()
+		allNodeHashes = models.GetAllNodeContentDialerKeys()
 	} else {
-		allNodeHashes = models.GetNodeContentHashesBySourceID(id)
+		allNodeHashes = models.GetNodeContentDialerKeysBySourceID(id)
 	}
 
 	utils.Info("📄订阅【%s】获取到订阅数量【%d】，现有节点数量【%d】，哈希数量【%d】，跨机场去重【%v】", subName, len(proxys), len(existingNodes), len(allNodeHashes), enableCrossDedup)
@@ -967,11 +967,13 @@ func scheduleClashToNodeLinks(ctx context.Context, id int, proxys []protocol.Pro
 		}
 
 		// 记录本次获取到的节点 ContentHash
+		variantKey := models.NodeVariantKey(contentHash, "")
+		// 删除判断仍按出站内容保留机场节点，避免同步任务误删用户配置的前置变体。
 		currentHashes[contentHash] = true
 
 		// 判断节点是否已存在（全库去重：使用 ContentHash 判断）
 		var nodeStatus string
-		if allNodeHashes[contentHash] {
+		if allNodeHashes[variantKey] {
 			skipCount++
 			nodeStatus = "skipped"
 			// 节点内容已存在 - 优先判断是否为本机场已存在节点
@@ -1022,7 +1024,7 @@ func scheduleClashToNodeLinks(ctx context.Context, id int, proxys []protocol.Pro
 				}
 			} else if enableCrossDedup {
 				// 跨机场去重开启：若全库已存在该内容，则跳过
-				if existingNode, exists := models.GetNodeByContentHash(contentHash); exists {
+				if existingNode, exists := models.GetNodeByContentHashAndDialer(contentHash, ""); exists {
 					// 检查是否为同 hash 不同名的信息节点（预扫描已确定）
 					if infoNodeHashes[contentHash] {
 						nodesToAdd = append(nodesToAdd, Node)
@@ -1040,7 +1042,7 @@ func scheduleClashToNodeLinks(ctx context.Context, id int, proxys []protocol.Pro
 						skipCount--
 						addSuccessCount++
 						nodeStatus = "added"
-						allNodeHashes[contentHash] = true
+						allNodeHashes[variantKey] = true
 						utils.Info("📌 节点【%s】与本次拉取中其他节点配置相同但名称不同（信息节点），允许入库", proxy.Name)
 					} else {
 						hashData := protocol.NormalizeProxyForHash(proxy)
@@ -1055,7 +1057,7 @@ func scheduleClashToNodeLinks(ctx context.Context, id int, proxys []protocol.Pro
 					skipCount--
 					addSuccessCount++
 					nodeStatus = "added"
-					allNodeHashes[contentHash] = true
+					allNodeHashes[variantKey] = true
 					utils.Info("📌 节点【%s】与本次拉取中其他节点配置相同但名称不同（信息节点），允许入库", proxy.Name)
 				} else {
 					hashData := protocol.NormalizeProxyForHash(proxy)
@@ -1069,7 +1071,7 @@ func scheduleClashToNodeLinks(ctx context.Context, id int, proxys []protocol.Pro
 			addSuccessCount++
 			nodeStatus = "added"
 			// 将新节点的 hash 加入全库集合，避免本次拉取内的重复
-			allNodeHashes[contentHash] = true
+			allNodeHashes[variantKey] = true
 		}
 
 		// 更新进度（通过 reporter 报告）

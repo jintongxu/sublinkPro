@@ -13,6 +13,7 @@ import Paper from '@mui/material/Paper';
 import Chip from '@mui/material/Chip';
 import Switch from '@mui/material/Switch';
 import CircularProgress from '@mui/material/CircularProgress';
+import Alert from '@mui/material/Alert';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import useMediaQuery from '@mui/material/useMediaQuery';
@@ -77,16 +78,22 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const getErrorMessage = (error, fallback) =>
+    error?.response?.data?.error || error?.response?.data?.msg || error?.message || fallback;
 
   const loadData = useCallback(async () => {
     if (!subscription?.ID) return;
     setLoading(true);
+    setErrorMessage('');
     try {
       const [rulesRes, optionsRes] = await Promise.all([getChainRules(subscription.ID), getChainOptions(subscription.ID)]);
       setRules(rulesRes?.data || []);
       setOptions(optionsRes?.data || { nodes: [], conditionFields: [], operators: [], groupTypes: [], templateGroups: [] });
     } catch (err) {
       console.error('Failed to load chain proxy data:', err);
+      setErrorMessage(getErrorMessage(err, t('subscriptions.chain.loadFailed', '加载链式代理配置失败')));
     } finally {
       setLoading(false);
     }
@@ -116,6 +123,7 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
   const handleSave = async () => {
     if (!editingRule) return;
 
+    setErrorMessage('');
     setLoading(true);
     try {
       if (editingRule.id) {
@@ -128,6 +136,7 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
       setEditingRule(null);
     } catch (err) {
       console.error('Failed to save chain rule:', err);
+      setErrorMessage(getErrorMessage(err, t('subscriptions.chain.saveFailed', '保存链式代理规则失败')));
     } finally {
       setLoading(false);
     }
@@ -142,6 +151,7 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
       await loadData();
     } catch (err) {
       console.error('Failed to delete chain rule:', err);
+      setErrorMessage(getErrorMessage(err, t('subscriptions.chain.deleteFailed', '删除链式代理规则失败')));
     } finally {
       setLoading(false);
     }
@@ -153,6 +163,7 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
       await loadData();
     } catch (err) {
       console.error('Failed to toggle chain rule status:', err);
+      setErrorMessage(getErrorMessage(err, t('subscriptions.chain.toggleFailed', '切换链式代理规则状态失败')));
     }
   };
 
@@ -171,6 +182,7 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
       );
     } catch (err) {
       console.error('Failed to save chain rule order:', err);
+      setErrorMessage(getErrorMessage(err, t('subscriptions.chain.sortFailed', '保存链式代理顺序失败')));
       await loadData();
     }
   };
@@ -192,6 +204,7 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
       setPreviewData(res?.data || null);
     } catch (err) {
       console.error('Failed to preview chain links:', err);
+      setErrorMessage(getErrorMessage(err, t('subscriptions.chain.previewFailed', '预览链式代理失败')));
       setPreviewData(null);
     } finally {
       setPreviewLoading(false);
@@ -317,6 +330,11 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
         </DialogTitle>
 
         <DialogContent dividers sx={{ p: isMobile ? 2 : 3, bgcolor: dialogSurface, borderColor: panelBorder }}>
+          {errorMessage && (
+            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setErrorMessage('')}>
+              {errorMessage}
+            </Alert>
+          )}
           {loading && (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
               <CircularProgress />

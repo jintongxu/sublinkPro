@@ -696,6 +696,19 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 
 	// ========== 第二阶段：遍历节点生成配置 ==========
 	preserveClashExtra := prepared.ClientType == "clash" || prepared.ClientType == "mihomo"
+	// 前置节点仍需写入 proxies 定义以供 dialer-proxy 引用，但不加入自动生成的代理组。
+	excludedProxyNames := make(map[string]bool)
+	for _, v := range sub.Nodes {
+		if strings.TrimSpace(v.DialerProxyName) == "" {
+			continue
+		}
+		for _, name := range strings.Split(v.DialerProxyName, ",") {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				excludedProxyNames[name] = true
+			}
+		}
+	}
 	for idx, v := range sub.Nodes {
 		// 计算 dialer-proxy（链式代理规则）
 		// 优先级：中间节点映射 > 目标节点映射 > 节点自身设置
@@ -703,6 +716,9 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 		// 使用最终名称重写链接，确保 proxy.name 与代理组、dialer-proxy 引用一致。
 		nodeLink := utils.RenameNodeLink(v.Link, finalNodeName)
 		dialerProxy := resolveClashDialerProxy(v, finalNodeName, chainNodeDialerMap, targetNodeDialerMap, dialerProxyNameMap)
+		if dialerProxy != "" {
+			excludedProxyNames[dialerProxy] = true
+		}
 
 		switch {
 		// 如果包含多条节点
@@ -758,6 +774,10 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 	if err != nil {
 		_, _ = c.Writer.WriteString("配置读取错误")
 		return mihomoBridgeOutput{}, false, false
+	}
+	configs.ExcludedProxyNames = make([]string, 0, len(excludedProxyNames))
+	for name := range excludedProxyNames {
+		configs.ExcludedProxyNames = append(configs.ExcludedProxyNames, name)
 	}
 
 	// 如果启用 Host 替换，填充 HostMap

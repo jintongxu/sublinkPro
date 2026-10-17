@@ -56,6 +56,17 @@ export default function NodeDialog({
       </DialogTitle>
       <DialogContent dividers sx={{ bgcolor: 'transparent', borderColor: tokens.panelBorder }}>
         <Stack spacing={2} sx={{ mt: 1 }}>
+          {!isEdit && (
+            <TextField
+              fullWidth
+              label={t('nodes.dialog.fields.remarkName', '节点名称')}
+              value={nodeForm.name}
+              onChange={(e) => setNodeForm({ ...nodeForm, name: e.target.value })}
+              placeholder={t('nodes.dialog.fields.remarkNamePlaceholder', '留空则使用节点原名称')}
+              helperText={t('nodes.dialog.fields.remarkNameAddHelper', '添加单个节点时可自定义名称；留空使用链接中的名称')}
+              sx={fieldControlSx}
+            />
+          )}
           <TextField
             fullWidth
             multiline

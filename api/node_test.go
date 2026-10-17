@@ -52,6 +52,56 @@ func setupNodeUpdateAPITestDB(t *testing.T) {
 
 // TestNodeUpdatePreservesClashExtraWhenLinkUnchanged verifies that metadata-only
 // edits keep retained Clash fields, while replacing the link clears stale fields.
+func TestNodeUpdateAllowsChangingDialerForSameLink(t *testing.T) {
+	setupNodeUpdateAPITestDB(t)
+	link := protocol.EncodeSSURL(protocol.Ss{
+		Name:   "same-target",
+		Server: "edge.example.com",
+		Port:   443,
+		Param:  protocol.Param{Cipher: "aes-256-gcm", Password: "password"},
+	})
+	proxy, err := protocol.LinkToProxy(protocol.Urls{Url: link}, protocol.OutputConfig{})
+	if err != nil {
+		t.Fatalf("parse test link: %v", err)
+	}
+	contentHash := protocol.GenerateProxyContentHash(proxy)
+	first := models.Node{Name: "target-a", LinkName: "same-target", NameMode: models.NodeNameModeLink, Link: link, ContentHash: contentHash, DialerProxyName: "front-a", Protocol: "ss"}
+	if err := first.Add(); err != nil {
+		t.Fatalf("add first node: %v", err)
+	}
+	second := models.Node{Name: "target-b", LinkName: "same-target", NameMode: models.NodeNameModeLink, Link: link, ContentHash: contentHash, DialerProxyName: "front-b", Protocol: "ss"}
+	if err := second.Add(); err != nil {
+		t.Fatalf("add second node: %v", err)
+	}
+
+	form := url.Values{
+		"oldname":            {first.Name},
+		"oldlink":            {link},
+		"oldDialerProxyName": {first.DialerProxyName},
+		"link":               {link},
+		"name":               {first.Name},
+		"nameMode":           {models.NodeNameModeLink},
+		"dialerProxyName":    {"front-c"},
+		"group":              {""},
+	}
+	recorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(recorder)
+	ginContext.Request = httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/nodes/update", strings.NewReader(form.Encode()))
+	ginContext.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	NodeUpdadte(ginContext)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("update status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+
+	var stored models.Node
+	if err := database.DB.First(&stored, first.ID).Error; err != nil {
+		t.Fatalf("reload updated node: %v", err)
+	}
+	if stored.DialerProxyName != "front-c" {
+		t.Fatalf("dialer proxy = %q, want front-c", stored.DialerProxyName)
+	}
+}
+
 func TestNodeUpdatePreservesClashExtraWhenLinkUnchanged(t *testing.T) {
 	for _, tt := range []struct {
 		name        string

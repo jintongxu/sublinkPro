@@ -152,7 +152,19 @@ export default function ShareManageDialog({ open, subscription, onClose, showMes
     if (systemDomainConfig) {
       return systemDomainConfig.replace(/\/+$/, '');
     }
-    return `${window.location.protocol}//${window.location.hostname}${window.location.port ? ':' + window.location.port : ''}`;
+
+    // 开发环境前端由 Vite 运行在 3100，订阅接口实际由后端 8000 提供。
+    // 优先使用 API 配置的 origin，避免把前端开发端口写入分享链接。
+    const apiUrl = import.meta.env.VITE_API_URL;
+    if (apiUrl) {
+      try {
+        return new URL(apiUrl, window.location.origin).origin;
+      } catch {
+        // 非法配置时回退到当前页面 origin。
+      }
+    }
+
+    return window.location.origin;
   }, [systemDomainConfig]);
 
   const fetchSystemDomain = async () => {

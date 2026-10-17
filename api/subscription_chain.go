@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -37,6 +38,18 @@ func GetChainRules(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": rules})
 }
 
+func validateChainRuleForSubscription(rule *models.SubscriptionChainRule, subID int) error {
+	var sub models.Subcription
+	sub.ID = subID
+	if err := sub.Find(); err != nil {
+		return fmt.Errorf("订阅不存在")
+	}
+	if err := sub.GetSub("none"); err != nil {
+		return fmt.Errorf("获取订阅节点失败: %w", err)
+	}
+	return models.ValidateChainRule(rule, sub.Nodes, models.GetChainRulesBySubscriptionID(subID))
+}
+
 // CreateChainRule 创建链式代理规则
 func CreateChainRule(c *gin.Context) {
 	subIDStr := c.Param("id")
@@ -57,6 +70,10 @@ func CreateChainRule(c *gin.Context) {
 	// 设置默认排序值（最后一个）
 	existingRules := models.GetChainRulesBySubscriptionID(subID)
 	rule.Sort = len(existingRules)
+	if err := validateChainRuleForSubscription(&rule, subID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	if err := rule.Add(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建规则失败: " + err.Error()})
@@ -112,6 +129,10 @@ func UpdateChainRule(c *gin.Context) {
 	utils.Debug("[ChainRule] 更新规则 ID=%d, 名称=%s", existingRule.ID, existingRule.Name)
 	utils.Debug("[ChainRule] ChainConfig: %s", existingRule.ChainConfig)
 	utils.Debug("[ChainRule] TargetConfig: %s", existingRule.TargetConfig)
+	if err := validateChainRuleForSubscription(&existingRule, subID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	if err := existingRule.Update(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新规则失败: " + err.Error()})

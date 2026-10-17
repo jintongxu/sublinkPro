@@ -25,7 +25,7 @@ type Node struct {
 	ID                 int    `gorm:"primaryKey"`
 	Link               string //出站代理原始连接
 	ClashExtra         string `gorm:"type:text" json:"-"` // 仅供 Clash/Mihomo 导出恢复的未知节点属性
-	LinkHash           string `gorm:"size:64;uniqueIndex" json:"-"`
+	LinkHash           string `gorm:"size:64;uniqueIndex:idx_nodes_link_hash_dialer" json:"-"`
 	Name               string //系统内节点备注名称
 	LinkName           string //节点原始名称
 	NameMode           string `gorm:"size:16;default:'link'"` // 节点出站名称模式：link=使用原始名称，remark=使用备注名称
@@ -36,7 +36,7 @@ type Node struct {
 	LinkPort           string //节点原始端口
 	LinkCountry        string //节点所属国家、落地IP国家
 	LandingIP          string //落地IP地址
-	DialerProxyName    string
+	DialerProxyName    string `gorm:"uniqueIndex:idx_nodes_link_hash_dialer"`
 	Source             string `gorm:"default:'manual'"`
 	SourceID           int
 	SourceSort         int `gorm:"default:0"` // 上游订阅中的顺序（从1开始；0表示未初始化）
@@ -120,6 +120,9 @@ var nodeCache *cache.MapCache[int, Node]
 
 // ErrNodeNameExists 表示节点备注名称已被其他节点占用。
 var ErrNodeNameExists = errors.New("node name already exists")
+
+// ErrNodeVariantExists 表示相同出站节点和前置代理已经存在。
+var ErrNodeVariantExists = errors.New("node variant already exists")
 
 func init() {
 	// 初始化节点缓存，主键为 ID
@@ -410,10 +413,15 @@ func UpdateNodeCache(id int, node Node) {
 	nodeCache.Set(id, node)
 }
 
-// FindNodeLinkConflict 查询除当前节点外是否存在相同原始链接的节点。
+// FindNodeLinkConflict 查询除当前节点外是否存在相同链接和前置代理的节点。
 func FindNodeLinkConflict(link string, excludeID int) (Node, bool, error) {
 	var existingNode Node
-	err := database.DB.Where("link = ? AND id != ?", link, excludeID).First(&existingNode).Error
+	var currentNode Node
+	if err := database.DB.First(&currentNode, excludeID).Error; err != nil {
+		return Node{}, false, err
+	}
+	linkHash := hashNodeLink(link)
+	err := database.DB.Where("link_hash = ? AND dialer_proxy_name = ? AND id != ?", linkHash, strings.TrimSpace(currentNode.DialerProxyName), excludeID).First(&existingNode).Error
 	if err == nil {
 		return existingNode, true, nil
 	}
@@ -472,13 +480,23 @@ func UpdateNodeFields(id int, updates map[string]any) error {
 // Add 添加节点
 func (node *Node) Add() error {
 	node.NormalizeNameModeDefaults()
+	node.DialerProxyName = strings.TrimSpace(node.DialerProxyName)
 	if err := EnsureNodeNameAvailable(node.Name, node.ID); err != nil {
 		return err
 	}
 	node.syncLinkHash()
-	// Write-Through: 先写数据库
+	var existing Node
+	if err := database.DB.Where("link_hash = ? AND dialer_proxy_name = ?", node.LinkHash, node.DialerProxyName).First(&existing).Error; err == nil {
+		return ErrNodeVariantExists
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	// Write-Through: 先写数据库；数据库唯一索引负责处理并发写入。
 	err := database.DB.Create(node).Error
 	if err != nil {
+		if lookupErr := database.DB.Where("link_hash = ? AND dialer_proxy_name = ?", node.LinkHash, node.DialerProxyName).First(&existing).Error; lookupErr == nil {
+			return ErrNodeVariantExists
+		}
 		return err
 	}
 	// 再更新缓存
@@ -489,6 +507,7 @@ func (node *Node) Add() error {
 // Update 更新节点
 func (node *Node) Update() error {
 	node.NormalizeNameModeDefaults()
+	node.DialerProxyName = strings.TrimSpace(node.DialerProxyName)
 	if err := EnsureNodeNameAvailable(node.Name, node.ID); err != nil {
 		return err
 	}
@@ -590,6 +609,7 @@ func BatchAddNodes(nodes []Node) error {
 	reservedNames := make(map[string]bool, len(nodes))
 	for i := range nodes {
 		nodes[i].NormalizeNameModeDefaults()
+		nodes[i].DialerProxyName = strings.TrimSpace(nodes[i].DialerProxyName)
 		nodes[i].Name = GenerateUniqueNodeNameWithSource(nodes[i].Name, nodes[i].Source, nodes[i].ID, reservedNames)
 	}
 
@@ -600,11 +620,12 @@ func BatchAddNodes(nodes []Node) error {
 	for chunkIdx, chunk := range chunks {
 		for i := range chunk {
 			chunk[i].NormalizeNameModeDefaults()
+			chunk[i].DialerProxyName = strings.TrimSpace(chunk[i].DialerProxyName)
 			chunk[i].syncLinkHash()
 		}
 		// 尝试批量插入
 		result := database.DB.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "link_hash"}},
+			Columns:   []clause.Column{{Name: "link_hash"}, {Name: "dialer_proxy_name"}},
 			DoNothing: true,
 		}).Create(&chunk)
 
@@ -633,10 +654,11 @@ func fallbackToIndividualNodeInsert(nodes []Node) int {
 	insertedCount := 0
 	for i := range nodes {
 		nodes[i].NormalizeNameModeDefaults()
+		nodes[i].DialerProxyName = strings.TrimSpace(nodes[i].DialerProxyName)
 		nodes[i].syncLinkHash()
 		// 使用 ON CONFLICT DO NOTHING 跳过已存在的节点
 		result := database.DB.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "link_hash"}},
+			Columns:   []clause.Column{{Name: "link_hash"}, {Name: "dialer_proxy_name"}},
 			DoNothing: true,
 		}).Create(&nodes[i])
 
@@ -927,9 +949,45 @@ func chunkNodes(nodes []Node, chunkSize int) [][]Node {
 	return chunks
 }
 
+// FindByLinkAndDialer 按出站链接和前置代理精确查找节点。
+func (node *Node) FindByLinkAndDialer(link, dialerProxyName string) error {
+	if strings.TrimSpace(link) == "" {
+		return fmt.Errorf("node link is required")
+	}
+	linkHash := hashNodeLink(link)
+	dialerProxyName = strings.TrimSpace(dialerProxyName)
+	results := nodeCache.Filter(func(n Node) bool {
+		return n.LinkHash == linkHash && strings.TrimSpace(n.DialerProxyName) == dialerProxyName
+	})
+	if len(results) > 0 {
+		*node = results[0]
+		return nil
+	}
+	if err := database.DB.Where("link_hash = ? AND dialer_proxy_name = ?", linkHash, dialerProxyName).First(node).Error; err != nil {
+		return err
+	}
+	nodeCache.Set(node.ID, *node)
+	return nil
+}
+
+// FindByLinkAndName 按链接和名称查找节点，兼容旧客户端未提交前置字段的更新请求。
+func (node *Node) FindByLinkAndName(link, name string) error {
+	if strings.TrimSpace(link) == "" || strings.TrimSpace(name) == "" {
+		return fmt.Errorf("node link and name are required")
+	}
+	linkHash := hashNodeLink(link)
+	query := database.DB.Where("link_hash = ? AND name = ?", linkHash, name)
+	if err := query.First(node).Error; err != nil {
+		return err
+	}
+	nodeCache.Set(node.ID, *node)
+	return nil
+}
+
 // Find 查找节点是否重复
 func (node *Node) Find() error {
-	// 优先用 link 精确查找（link 全局唯一）
+	// 优先用 link 精确查找；历史调用仍返回匹配到的第一条记录。
+
 	if node.Link != "" {
 		node.syncLinkHash()
 		results := nodeCache.Filter(func(n Node) bool {
@@ -1570,14 +1628,15 @@ func (node *Node) Del() error {
 // UpsertNode 插入或更新节点
 func (node *Node) UpsertNode() error {
 	node.NormalizeNameModeDefaults()
+	node.DialerProxyName = strings.TrimSpace(node.DialerProxyName)
 	if err := EnsureNodeNameAvailable(node.Name, node.ID); err != nil {
 		return err
 	}
 	node.syncLinkHash()
 	// Write-Through: 先写数据库
 	err := database.DB.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "link_hash"}},
-		DoUpdates: clause.AssignmentColumns([]string{"link", "link_hash", "name", "name_mode", "link_name", "link_address", "link_host", "link_port", "link_country", "source", "source_id", "group"}),
+		Columns:   []clause.Column{{Name: "link_hash"}, {Name: "dialer_proxy_name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"link", "link_hash", "dialer_proxy_name", "name", "name_mode", "link_name", "link_address", "link_host", "link_port", "link_country", "source", "source_id", "group"}),
 	}).Create(node).Error
 	if err != nil {
 		return err
@@ -1585,7 +1644,7 @@ func (node *Node) UpsertNode() error {
 
 	// 查询更新后的节点并更新缓存
 	var updatedNode Node
-	if err := database.DB.Where("link_hash = ?", node.LinkHash).First(&updatedNode).Error; err == nil {
+	if err := database.DB.Where("link_hash = ? AND dialer_proxy_name = ?", node.LinkHash, node.DialerProxyName).First(&updatedNode).Error; err == nil {
 		nodeCache.Set(updatedNode.ID, updatedNode)
 		*node = updatedNode
 	}
@@ -1683,6 +1742,28 @@ func BatchUpdateGroup(ids []int, group string) error {
 func BatchUpdateDialerProxy(ids []int, dialerProxyName string) error {
 	if len(ids) == 0 {
 		return nil
+	}
+	dialerProxyName = strings.TrimSpace(dialerProxyName)
+
+	// 先检查所选节点内部是否会产生 (link_hash, dialer_proxy_name) 冲突。
+	var selected []Node
+	if err := database.DB.Where("id IN ?", ids).Find(&selected).Error; err != nil {
+		return err
+	}
+	for i := range selected {
+		var conflict Node
+		err := database.DB.Where("link_hash = ? AND dialer_proxy_name = ? AND id NOT IN ?", selected[i].LinkHash, dialerProxyName, ids).First(&conflict).Error
+		if err == nil {
+			return fmt.Errorf("节点 %d 的前置代理与节点 %d 冲突", selected[i].ID, conflict.ID)
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		for j := 0; j < i; j++ {
+			if selected[j].LinkHash == selected[i].LinkHash {
+				return fmt.Errorf("节点 %d 与节点 %d 的前置代理配置冲突", selected[i].ID, selected[j].ID)
+			}
+		}
 	}
 
 	// 使用事务更新
@@ -2787,6 +2868,33 @@ func (node *Node) GetFieldValue(fieldName string) string {
 
 // ========== ContentHash 相关查询方法 ==========
 
+// NodeVariantKey 返回节点内容与前置代理的规范化查重键。
+func NodeVariantKey(contentHash, dialerProxyName string) string {
+	return contentHash + "\x00" + strings.TrimSpace(dialerProxyName)
+}
+
+// GetAllNodeContentDialerKeys 获取全库节点的内容+前置代理查重键集合。
+func GetAllNodeContentDialerKeys() map[string]bool {
+	keys := make(map[string]bool)
+	for _, n := range nodeCache.GetAll() {
+		if n.ContentHash != "" {
+			keys[NodeVariantKey(n.ContentHash, n.DialerProxyName)] = true
+		}
+	}
+	return keys
+}
+
+// GetNodeContentDialerKeysBySourceID 获取指定来源的内容+前置代理查重键集合。
+func GetNodeContentDialerKeysBySourceID(sourceID int) map[string]bool {
+	keys := make(map[string]bool)
+	for _, n := range nodeCache.GetByIndex("sourceID", fmt.Sprintf("%d", sourceID)) {
+		if n.ContentHash != "" {
+			keys[NodeVariantKey(n.ContentHash, n.DialerProxyName)] = true
+		}
+	}
+	return keys
+}
+
 // GetAllNodeContentHashes 获取全库节点的 ContentHash 集合
 // 用于全库去重判断
 func GetAllNodeContentHashes() map[string]bool {
@@ -2821,6 +2929,41 @@ func NodeExistsByContentHash(contentHash string) bool {
 	return len(nodes) > 0
 }
 
+// GetNodeByContentHashAndDialer 根据 ContentHash + 前置代理获取节点（如果存在）。
+// ContentHash 不包含前置代理，因此相同出站节点可以通过不同前置并存。
+func GetNodeByContentHashAndDialer(contentHash, dialerProxyName string) (*Node, bool) {
+	if contentHash == "" {
+		return nil, false
+	}
+	dialerProxyName = strings.TrimSpace(dialerProxyName)
+	if node, ok := findCachedNodeByContentHashAndDialer(contentHash, dialerProxyName); ok {
+		return node, true
+	}
+
+	// 缓存未命中时回源数据库，避免缓存延迟导致误判。
+	var nodes []Node
+	if err := database.DB.Where("content_hash = ?", contentHash).Find(&nodes).Error; err != nil {
+		return nil, false
+	}
+	for i := range nodes {
+		if strings.TrimSpace(nodes[i].DialerProxyName) == dialerProxyName {
+			nodeCache.Set(nodes[i].ID, nodes[i])
+			return &nodes[i], true
+		}
+	}
+	return nil, false
+}
+
+func findCachedNodeByContentHashAndDialer(contentHash, dialerProxyName string) (*Node, bool) {
+	nodes := nodeCache.GetByIndex("contentHash", contentHash)
+	for i := range nodes {
+		if strings.TrimSpace(nodes[i].DialerProxyName) == dialerProxyName {
+			return &nodes[i], true
+		}
+	}
+	return nil, false
+}
+
 // GetNodeByContentHash 根据 ContentHash 获取节点（如果存在）
 func GetNodeByContentHash(contentHash string) (*Node, bool) {
 	if contentHash == "" {
@@ -2829,6 +2972,33 @@ func GetNodeByContentHash(contentHash string) (*Node, bool) {
 	nodes := nodeCache.GetByIndex("contentHash", contentHash)
 	if len(nodes) > 0 {
 		return &nodes[0], true
+	}
+	return nil, false
+}
+
+// GetNodeByContentHashSourceAndDialer 根据 ContentHash、来源和前置代理获取节点。
+func GetNodeByContentHashSourceAndDialer(contentHash string, sourceID int, dialerProxyName string) (*Node, bool) {
+	if contentHash == "" {
+		return nil, false
+	}
+	dialerProxyName = strings.TrimSpace(dialerProxyName)
+	if nodes := nodeCache.GetByIndex("contentHash", contentHash); len(nodes) > 0 {
+		for i := range nodes {
+			if nodes[i].SourceID == sourceID && strings.TrimSpace(nodes[i].DialerProxyName) == dialerProxyName {
+				return &nodes[i], true
+			}
+		}
+	}
+
+	var nodes []Node
+	if err := database.DB.Where("content_hash = ? AND source_id = ?", contentHash, sourceID).Find(&nodes).Error; err != nil {
+		return nil, false
+	}
+	for i := range nodes {
+		if strings.TrimSpace(nodes[i].DialerProxyName) == dialerProxyName {
+			nodeCache.Set(nodes[i].ID, nodes[i])
+			return &nodes[i], true
+		}
 	}
 	return nil, false
 }
@@ -2842,6 +3012,21 @@ func GetNodeByContentHashAndSourceID(contentHash string, sourceID int) (*Node, b
 	nodes := nodeCache.GetByIndex("contentHash", contentHash)
 	for i := range nodes {
 		if nodes[i].SourceID == sourceID {
+			return &nodes[i], true
+		}
+	}
+	return nil, false
+}
+
+// GetOtherNodeByContentHashAndDialer 根据 ContentHash + 前置代理查找任意“非自身”的节点。
+func GetOtherNodeByContentHashAndDialer(contentHash, dialerProxyName string, excludeID int) (*Node, bool) {
+	if contentHash == "" {
+		return nil, false
+	}
+	dialerProxyName = strings.TrimSpace(dialerProxyName)
+	nodes := nodeCache.GetByIndex("contentHash", contentHash)
+	for i := range nodes {
+		if nodes[i].ID != excludeID && strings.TrimSpace(nodes[i].DialerProxyName) == dialerProxyName {
 			return &nodes[i], true
 		}
 	}
@@ -2866,15 +3051,25 @@ func GetOtherNodeByContentHash(contentHash string, excludeID int) (*Node, bool) 
 // GetOtherNodeByContentHashAndSourceID 根据 ContentHash + SourceID 查找任意“非自身”的节点
 // 用于跨机场去重关闭时的“同机场去重”校验。
 func GetOtherNodeByContentHashAndSourceID(contentHash string, sourceID int, excludeID int) (*Node, bool) {
+	return getOtherNodeByContentHashSourceAndDialer(contentHash, sourceID, "", false, excludeID)
+}
+
+// GetOtherNodeByContentHashSourceAndDialer 根据 ContentHash、来源和前置代理查找节点。
+func GetOtherNodeByContentHashSourceAndDialer(contentHash string, sourceID int, dialerProxyName string, excludeID int) (*Node, bool) {
+	return getOtherNodeByContentHashSourceAndDialer(contentHash, sourceID, dialerProxyName, true, excludeID)
+}
+
+func getOtherNodeByContentHashSourceAndDialer(contentHash string, sourceID int, dialerProxyName string, matchDialer bool, excludeID int) (*Node, bool) {
 	if contentHash == "" {
 		return nil, false
 	}
 	nodes := nodeCache.GetByIndex("contentHash", contentHash)
+	dialerProxyName = strings.TrimSpace(dialerProxyName)
 	for i := range nodes {
-		if nodes[i].ID == excludeID {
+		if nodes[i].ID == excludeID || nodes[i].SourceID != sourceID {
 			continue
 		}
-		if nodes[i].SourceID == sourceID {
+		if !matchDialer || strings.TrimSpace(nodes[i].DialerProxyName) == dialerProxyName {
 			return &nodes[i], true
 		}
 	}

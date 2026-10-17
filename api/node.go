@@ -47,6 +47,10 @@ func normalizeUnlockStatus(value string) string {
 }
 
 func failNodeNameConflict(c *gin.Context, err error) bool {
+	if errors.Is(err, models.ErrNodeVariantExists) {
+		utils.FailWithMsg(c, "相同出站节点和前置代理已存在")
+		return true
+	}
 	if errors.Is(err, models.ErrNodeNameExists) {
 		utils.FailWithMsg(c, "节点备注名称已存在，请换一个备注")
 		return true
@@ -228,22 +232,33 @@ func NodeUpdadte(c *gin.Context) {
 		nameMode, hasNameMode = c.GetPostForm("NameMode")
 	}
 	dialerProxyName := c.PostForm("dialerProxyName")
+	oldDialerProxyName, hasOldDialerProxyName := c.GetPostForm("oldDialerProxyName")
+	if !hasOldDialerProxyName {
+		oldDialerProxyName = ""
+	}
 	group := c.PostForm("group")
 	if link == "" {
 		utils.FailWithMsg(c, "节点链接不能为空")
 		return
 	}
 	userProvidedName := strings.TrimSpace(name) != ""
-	// 查找旧节点
+	// 查找旧节点；相同出站链接可能因前置不同而有多个记录。
 	Node.Name = oldname
 	Node.Link = oldlink
-	err := Node.Find()
+	var err error
+	if hasOldDialerProxyName {
+		err = Node.FindByLinkAndDialer(oldlink, oldDialerProxyName)
+	} else {
+		// 兼容旧客户端：用旧链接和名称定位，避免同链接不同前置时误选兄弟节点。
+		err = Node.FindByLinkAndName(oldlink, oldname)
+	}
 	if err != nil {
 		utils.FailWithMsg(c, err.Error())
 		return
 	}
 	storedLink := Node.Link
 	oldContentHash := Node.ContentHash
+	storedDialerProxyName := Node.DialerProxyName
 	if hasNameMode {
 		Node.NameMode = models.NormalizeNodeNameMode(nameMode)
 	} else {
@@ -290,7 +305,7 @@ func NodeUpdadte(c *gin.Context) {
 		// 链接发生变化后，旧链接对应的未建模 Clash 字段不再可靠，必须丢弃以避免错配。
 		Node.ClashExtra = ""
 	}
-	Node.DialerProxyName = dialerProxyName
+	Node.DialerProxyName = strings.TrimSpace(dialerProxyName)
 	Node.Group = group
 	Node.Protocol = protocol.GetProtocolFromLink(link)
 
@@ -300,8 +315,8 @@ func NodeUpdadte(c *gin.Context) {
 		contentHash := protocol.GenerateProxyContentHash(proxy)
 		if contentHash != "" {
 			Node.ContentHash = contentHash
-			// 内容未变化时无需重复校验（避免历史数据存在重复时无法正常改名/改分组）
-			if contentHash != oldContentHash {
+			// 出站内容或前置代理变化时，需要重新检查复合唯一性。
+			if contentHash != oldContentHash || strings.TrimSpace(Node.DialerProxyName) != strings.TrimSpace(storedDialerProxyName) {
 				// 读取全局配置：是否启用跨机场去重（默认启用）
 				crossAirportDedupVal, _ := models.GetSetting("cross_airport_dedup_enabled")
 				enableCrossDedup := crossAirportDedupVal != "false"
@@ -310,9 +325,9 @@ func NodeUpdadte(c *gin.Context) {
 				var dupNode *models.Node
 				var exists bool
 				if enableCrossDedup {
-					dupNode, exists = models.GetOtherNodeByContentHash(contentHash, Node.ID)
+					dupNode, exists = models.GetOtherNodeByContentHashAndDialer(contentHash, Node.DialerProxyName, Node.ID)
 				} else {
-					dupNode, exists = models.GetOtherNodeByContentHashAndSourceID(contentHash, Node.SourceID, Node.ID)
+					dupNode, exists = models.GetOtherNodeByContentHashSourceAndDialer(contentHash, Node.SourceID, Node.DialerProxyName, Node.ID)
 				}
 				if exists && dupNode != nil {
 					// 构建详细的重复信息
@@ -474,7 +489,7 @@ func NodeAdd(c *gin.Context) {
 		nameModeInput = c.PostForm("NameMode")
 	}
 	nameMode := models.NormalizeNodeNameMode(nameModeInput)
-	dialerProxyName := c.PostForm("dialerProxyName")
+	dialerProxyName := strings.TrimSpace(c.PostForm("dialerProxyName"))
 	group := c.PostForm("group")
 	if link == "" {
 		utils.FailWithMsg(c, "link  不能为空")
@@ -534,11 +549,11 @@ func NodeAdd(c *gin.Context) {
 					n.ContentHash = contentHash
 					// 检查是否已存在相同内容的节点（跨机场去重关闭时仅校验同来源）
 					if enableCrossDedup {
-						if _, exists := models.GetNodeByContentHash(contentHash); exists {
+						if _, exists := models.GetNodeByContentHashAndDialer(contentHash, n.DialerProxyName); exists {
 							failedCount++
 							continue
 						}
-					} else if _, exists := models.GetNodeByContentHashAndSourceID(contentHash, 0); exists {
+					} else if _, exists := models.GetNodeByContentHashSourceAndDialer(contentHash, 0, n.DialerProxyName); exists {
 						failedCount++
 						continue
 					}
@@ -590,7 +605,7 @@ func NodeAdd(c *gin.Context) {
 	Node.LinkPort = identity.Port
 
 	Node.Link = link
-	Node.DialerProxyName = dialerProxyName
+	Node.DialerProxyName = strings.TrimSpace(dialerProxyName)
 	Node.Group = group
 	Node.Protocol = protocol.GetProtocolFromLink(link)
 
@@ -604,9 +619,9 @@ func NodeAdd(c *gin.Context) {
 			var existingNode *models.Node
 			var exists bool
 			if enableCrossDedup {
-				existingNode, exists = models.GetNodeByContentHash(contentHash)
+				existingNode, exists = models.GetNodeByContentHashAndDialer(contentHash, Node.DialerProxyName)
 			} else {
-				existingNode, exists = models.GetNodeByContentHashAndSourceID(contentHash, 0)
+				existingNode, exists = models.GetNodeByContentHashSourceAndDialer(contentHash, 0, Node.DialerProxyName)
 			}
 			if exists && existingNode != nil {
 				// 重复节点：返回成功响应 + 跳过标记，不终止添加流程
@@ -767,7 +782,7 @@ func NodeBatchUpdateDialerProxy(c *gin.Context) {
 		utils.FailWithMsg(c, "请选择要修改的节点")
 		return
 	}
-	err := models.BatchUpdateDialerProxy(req.IDs, req.DialerProxyName)
+	err := models.BatchUpdateDialerProxy(req.IDs, strings.TrimSpace(req.DialerProxyName))
 	if err != nil {
 		utils.FailWithMsg(c, "批量更新前置代理失败")
 		return

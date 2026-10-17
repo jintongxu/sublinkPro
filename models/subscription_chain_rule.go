@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sublink/cache"
 	"sublink/database"
 	"sublink/utils"
@@ -96,6 +97,94 @@ func InitChainRuleCache() error {
 	utils.Info("链式代理规则缓存初始化完成，共加载 %d 条规则", chainRuleCache.Count())
 
 	cache.Manager.Register("chainRule", chainRuleCache)
+	return nil
+}
+
+// ValidateChainRule 校验规则结构及其引用的订阅节点。
+func ValidateChainRule(rule *SubscriptionChainRule, subscriptionNodes []Node, existingRules []SubscriptionChainRule) error {
+	if rule == nil {
+		return fmt.Errorf("规则不能为空")
+	}
+	items, err := rule.ParseChainConfig()
+	if err != nil {
+		return fmt.Errorf("代理链配置格式错误: %w", err)
+	}
+	if len(items) == 0 {
+		return fmt.Errorf("代理链不能为空")
+	}
+	target, err := rule.ParseTargetConfig()
+	if err != nil {
+		return fmt.Errorf("目标配置格式错误: %w", err)
+	}
+	nodeIDs := make(map[int]bool, len(subscriptionNodes))
+	for _, node := range subscriptionNodes {
+		nodeIDs[node.ID] = true
+	}
+	seenNodes := make(map[int]bool)
+	groupNames := make(map[string]bool)
+	allowedTypes := map[string]bool{"template_group": true, "custom_group": true, "dynamic_node": true, "specified_node": true}
+	allowedGroupTypes := map[string]bool{"select": true, "url-test": true, "fallback": true, "load-balance": true}
+	for i, item := range items {
+		if !allowedTypes[item.Type] {
+			return fmt.Errorf("链路第 %d 项类型无效: %s", i+1, item.Type)
+		}
+		switch item.Type {
+		case "template_group":
+			if strings.TrimSpace(item.GroupName) == "" {
+				return fmt.Errorf("链路第 %d 项模板代理组不能为空", i+1)
+			}
+		case "custom_group":
+			name := strings.TrimSpace(item.GroupName)
+			if name == "" {
+				return fmt.Errorf("链路第 %d 项自定义代理组名称不能为空", i+1)
+			}
+			if groupNames[name] {
+				return fmt.Errorf("自定义代理组名称重复: %s", name)
+			}
+			groupNames[name] = true
+			if item.GroupType != "" && !allowedGroupTypes[item.GroupType] {
+				return fmt.Errorf("链路第 %d 项代理组类型无效: %s", i+1, item.GroupType)
+			}
+		case "dynamic_node":
+			if item.NodeConditions == nil {
+				return fmt.Errorf("链路第 %d 项动态节点缺少匹配条件", i+1)
+			}
+		case "specified_node":
+			if item.NodeID <= 0 || !nodeIDs[item.NodeID] {
+				return fmt.Errorf("链路第 %d 项引用了不属于当前订阅的节点", i+1)
+			}
+			if seenNodes[item.NodeID] {
+				return fmt.Errorf("链路中重复引用节点 ID %d", item.NodeID)
+			}
+			seenNodes[item.NodeID] = true
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("目标配置不能为空")
+	}
+	switch target.Type {
+	case "all":
+	case "conditions":
+		if target.Conditions == nil {
+			return fmt.Errorf("目标条件不能为空")
+		}
+	case "specified_node":
+		if target.NodeID <= 0 || !nodeIDs[target.NodeID] {
+			return fmt.Errorf("目标节点不属于当前订阅")
+		}
+	default:
+		return fmt.Errorf("目标类型无效: %s", target.Type)
+	}
+	trimmedName := strings.TrimSpace(rule.Name)
+	if trimmedName == "" {
+		return fmt.Errorf("规则名称不能为空")
+	}
+	for _, existing := range existingRules {
+		if existing.ID != rule.ID && strings.EqualFold(strings.TrimSpace(existing.Name), trimmedName) {
+			return fmt.Errorf("规则名称已存在: %s", trimmedName)
+		}
+	}
+	rule.Name = trimmedName
 	return nil
 }
 

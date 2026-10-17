@@ -364,6 +364,29 @@ func RunMigrations() error {
 		utils.Error("执行迁移 0037_normalize_host_hostnames 失败: %v", err)
 	}
 
+	if err := database.RunCustomMigration("0038_allow_node_dialer_variants", func() error {
+		// LinkHash identifies the outbound node only. The same outbound node may
+		// legitimately have different front proxies, so uniqueness is composite.
+		if db.Migrator().HasIndex(&Node{}, "idx_nodes_link_hash_dialer") {
+			if err := db.Migrator().DropIndex(&Node{}, "idx_nodes_link_hash_dialer"); err != nil {
+				return fmt.Errorf("删除旧节点唯一索引失败: %w", err)
+			}
+		}
+		for _, legacyIndex := range []string{"idx_nodes_link_hash", "uni_nodes_link_hash"} {
+			if db.Migrator().HasIndex(&Node{}, legacyIndex) {
+				if err := db.Migrator().DropIndex(&Node{}, legacyIndex); err != nil {
+					return fmt.Errorf("删除旧节点链接索引 %s 失败: %w", legacyIndex, err)
+				}
+			}
+		}
+		if err := db.AutoMigrate(&Node{}); err != nil {
+			return fmt.Errorf("创建节点链接/前置复合唯一索引失败: %w", err)
+		}
+		return nil
+	}); err != nil {
+		utils.Error("执行迁移 0038_allow_node_dialer_variants 失败: %v", err)
+	}
+
 	if err := database.RunCustomMigration("0024_migrate_legacy_webhook_settings", func() error {
 		legacyURL, _ := GetSetting("webhook_url")
 		legacyMethod, _ := GetSetting("webhook_method")
