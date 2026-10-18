@@ -76,6 +76,14 @@ Both **intermediate nodes** and **target nodes** support dynamic condition based
 > [!NOTE]
 > Chain proxy rules are **saved per subscription and applied during subscription generation**. They are not global runtime proxy rules. Template proxy groups come from the Clash template associated with the subscription. Final generated nodes implement the chain through Clash `dialer-proxy`.
 
+### Multiple policies and landing-node sets
+
+A subscription can contain multiple ordered policies, for example `Hong Kong relay group → US landing nodes` and `Japan relay group → Singapore landing nodes`. Each policy can select its own entry group/node and a set of landing nodes. The lower sort value is evaluated first; when a policy matches, its entry chain overrides the matched node's own `DialerProxyName`. If no policy matches, the node-level `DialerProxyName` remains the fallback.
+
+### Node dialer-proxy dependencies
+
+When you select a node with a configured `dialer-proxy` in the subscription node selector, the system automatically includes a uniquely matched front-proxy node in the submitted subscription node set. This prevents the generated configuration from referencing a missing proxy. Automatically included dependencies are hidden from the “selected nodes” list; if the name cannot be matched uniquely, such as a policy-group name, no node is added automatically.
+
 ### Common examples
 
 | Goal | Intermediate node condition | Target node condition |

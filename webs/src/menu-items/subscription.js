@@ -11,7 +11,8 @@ import {
   IconWorld,
   IconPlane,
   IconFlag,
-  IconRefreshDot
+  IconRefreshDot,
+  IconGitBranch
 } from '@tabler/icons-react';
 
 // ==============================|| SUBSCRIPTION MENU ITEMS ||============================== //
@@ -47,6 +48,15 @@ const subscription = {
       type: 'item',
       url: '/subscription/node-check',
       icon: IconDeviceDesktopAnalytics,
+      breadcrumbs: true
+    },
+    {
+      id: 'chain-proxy',
+      title: 'Chain Proxy',
+      titleKey: 'navigation.items.chainProxy',
+      type: 'item',
+      url: '/subscription/chain-proxy',
+      icon: IconGitBranch,
       breadcrumbs: true
     },
     {

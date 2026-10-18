@@ -67,9 +67,11 @@ func CreateChainRule(c *gin.Context) {
 
 	rule.SubscriptionID = subID
 
-	// 设置默认排序值（最后一个）
+	// 未提供排序值时追加到末尾；显式传入的优先级保留。
 	existingRules := models.GetChainRulesBySubscriptionID(subID)
-	rule.Sort = len(existingRules)
+	if rule.Sort == 0 && len(existingRules) > 0 {
+		rule.Sort = len(existingRules)
+	}
 	if err := validateChainRuleForSubscription(&rule, subID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -122,6 +124,7 @@ func UpdateChainRule(c *gin.Context) {
 	// 更新字段
 	existingRule.Name = updateData.Name
 	existingRule.Enabled = updateData.Enabled
+	existingRule.Sort = updateData.Sort
 	existingRule.ChainConfig = updateData.ChainConfig
 	existingRule.TargetConfig = updateData.TargetConfig
 
@@ -473,8 +476,9 @@ type NodeMatchSummary struct {
 	LinkCountry   string `json:"linkCountry"`
 	MatchedRule   string `json:"matchedRule"` // 匹配的规则名称（第一个匹配的）
 	MatchedRuleID int    `json:"matchedRuleId"`
-	EntryProxy    string `json:"entryProxy"` // 入口代理名称
-	Unmatched     bool   `json:"unmatched"`  // 是否未匹配任何规则
+	EntryProxy    string `json:"entryProxy"`  // 入口代理名称
+	FinalDialer   string `json:"finalDialer"` // 最终生效的前置代理
+	Unmatched     bool   `json:"unmatched"`   // 是否未匹配任何规则
 }
 
 func buildChainLinkPreviewNode(node models.Node) ChainLinkPreviewNode {
@@ -689,6 +693,23 @@ func buildRulePreviewData(rule models.SubscriptionChainRule, nodes []models.Node
 			} else {
 				data.TargetInfo = "(节点不存在)"
 			}
+		case "specified_nodes":
+			// Keep the configured order in previews so callers can present the
+			// selected nodes consistently with the create/update payload.  A rule
+			// saved by an older version may contain an unavailable node; retain a
+			// visible marker instead of silently dropping it.
+			names := make([]string, 0, len(targetConfig.NodeIDs))
+			for _, nodeID := range targetConfig.NodeIDs {
+				if name, ok := nodeNameMap[nodeID]; ok {
+					names = append(names, name)
+					if node, exists := nodeInfoMap[nodeID]; exists {
+						data.TargetNodes = append(data.TargetNodes, buildChainLinkPreviewNode(node))
+					}
+				} else {
+					names = append(names, fmt.Sprintf("(节点不存在: %d)", nodeID))
+				}
+			}
+			data.TargetInfo = strings.Join(names, ", ")
 		}
 	}
 
@@ -735,6 +756,9 @@ func buildNodeMatchSummary(nodes []models.Node, rules []models.SubscriptionChain
 							ms.EntryProxy = name
 						}
 					}
+				}
+				if result, resolveErr := rule.ResolveChainLinks(nodes, nodeNameMap); resolveErr == nil && result != nil {
+					ms.FinalDialer = result.FinalDialer
 				}
 				break // 只取第一个匹配的规则
 			}

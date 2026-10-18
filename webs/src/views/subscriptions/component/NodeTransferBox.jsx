@@ -311,7 +311,7 @@ export default function NodeTransferBox({
             iconPosition="end"
           />
           <Tab
-            label={t('subscriptions.transfer.selectedTab', { count: selectedNodes.length })}
+            label={t('subscriptions.transfer.selectedTab', { count: selectedNodesList.length })}
             icon={<ChevronLeftIcon />}
             iconPosition="start"
           />
@@ -467,7 +467,7 @@ export default function NodeTransferBox({
                   }
                 />
                 <Chip
-                  label={t('subscriptions.transfer.selectedChip', { count: selectedNodes.length })}
+                  label={t('subscriptions.transfer.selectedChip', { count: selectedNodesList.length })}
                   size="small"
                   color="success"
                   sx={{
@@ -724,7 +724,7 @@ export default function NodeTransferBox({
               </Typography>
             </Stack>
             <Chip
-              label={selectedNodes.length}
+              label={selectedNodesList.length}
               size="small"
               color="success"
               sx={{

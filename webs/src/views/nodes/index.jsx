@@ -81,6 +81,7 @@ const DEFAULT_COLUMN_WIDTHS = {
   protocol: 92,
   group: 120,
   source: 120,
+  dialerProxy: 220,
   tags: 120,
   country: 80,
   delay: 130,
@@ -302,6 +303,8 @@ export default function NodeList() {
   // 节点详情面板
   const [detailsPanelOpen, setDetailsPanelOpen] = useState(false);
   const [detailsNode, setDetailsNode] = useState(null);
+  const [referenceNodes, setReferenceNodes] = useState([]);
+  const [loadingReferenceNodes, setLoadingReferenceNodes] = useState(false);
 
   // 协议 UI 元数据
   const [protocolMeta, setProtocolMeta] = useState([]);
@@ -384,6 +387,29 @@ export default function NodeList() {
       setLoadingProxyNodes(false);
     }
   }, [proxyNodeOptions.length]);
+
+  // 详情面板需要跨分页查找前置代理引用关系，因此按需加载完整节点列表。
+  const fetchReferenceNodes = useCallback(async (force = false) => {
+    if (!force && referenceNodes.length > 0) return;
+    setLoadingReferenceNodes(true);
+    try {
+      const response = await getNodes({});
+      setReferenceNodes(response.data || []);
+    } catch (error) {
+      console.error('获取前置代理引用关系失败:', error);
+    } finally {
+      setLoadingReferenceNodes(false);
+    }
+  }, [referenceNodes.length]);
+
+  const openNodeDetails = useCallback(
+    (node) => {
+      setDetailsNode(node);
+      setDetailsPanelOpen(true);
+      fetchReferenceNodes();
+    },
+    [fetchReferenceNodes]
+  );
 
   // 初始化加载
   useEffect(() => {
@@ -637,6 +663,10 @@ export default function NodeList() {
   }, []);
 
   const handleRefresh = useCallback(() => {
+    setReferenceNodes([]);
+    if (detailsPanelOpen) {
+      fetchReferenceNodes(true);
+    }
     fetchNodes(getCurrentFilters());
     refreshFilterOptions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -657,6 +687,8 @@ export default function NodeList() {
     residentialType,
     ipType,
     qualityStatus,
+    detailsPanelOpen,
+    fetchReferenceNodes,
     unlockRules,
     unlockRuleMode,
     sortBy,
@@ -849,6 +881,7 @@ export default function NodeList() {
       showMessage(t('nodes.page.messages.batchDialerProxySuccess', { count: selectedNodes.length }));
       setSelectedNodes([]);
       setBatchDialerProxyDialogOpen(false);
+      fetchReferenceNodes(true);
       fetchNodes(getCurrentFilters());
     } catch (error) {
       console.error(error);
@@ -1020,6 +1053,7 @@ export default function NodeList() {
             const res = await addNodes({
               link,
               name: nodeLinks.length === 1 ? nodeForm.name.trim() : '',
+              nameMode: nodeLinks.length === 1 && nodeForm.name.trim() ? 'remark' : nodeForm.nameMode || 'link',
               dialerProxyName: nodeForm.dialerProxyName.trim(),
               group: nodeForm.group.trim(),
               tags: tagNames
@@ -1353,10 +1387,7 @@ export default function NodeList() {
           tagColorMap={tagColorMap}
           protocolMeta={protocolMeta}
           onSelect={handleSelectNode}
-          onViewDetails={(node) => {
-            setDetailsNode(node);
-            setDetailsPanelOpen(true);
-          }}
+          onViewDetails={openNodeDetails}
         />
       ) : (
         <NodeTable
@@ -1368,6 +1399,8 @@ export default function NodeList() {
           sortOrder={sortOrder}
           tagColorMap={tagColorMap}
           protocolMeta={protocolMeta}
+          referenceNodes={referenceNodes}
+          loadingReferenceNodes={loadingReferenceNodes}
           columnWidths={columnWidths}
           onSelectAll={handleSelectAll}
           onSelect={handleSelectNode}
@@ -1376,10 +1409,7 @@ export default function NodeList() {
           onCopy={copyToClipboard}
           onEdit={handleEditNode}
           onDelete={handleDeleteNode}
-          onViewDetails={(node) => {
-            setDetailsNode(node);
-            setDetailsPanelOpen(true);
-          }}
+          onViewDetails={openNodeDetails}
           onColumnResize={handleColumnResize}
           onOpenRawProtocol={handleOpenRawProtocol}
         />
@@ -1525,6 +1555,8 @@ export default function NodeList() {
       <NodeDetailsPanel
         open={detailsPanelOpen}
         node={detailsNode}
+        referenceNodes={referenceNodes}
+        loadingReferenceNodes={loadingReferenceNodes}
         tagColorMap={tagColorMap}
         protocolMeta={protocolMeta}
         onClose={() => setDetailsPanelOpen(false)}
@@ -1538,6 +1570,8 @@ export default function NodeList() {
         }}
         onNodeUpdate={() => {
           // 节点原始信息更新后刷新列表
+          setReferenceNodes([]);
+          fetchReferenceNodes(true);
           fetchNodes(getCurrentFilters());
         }}
         showMessage={showMessage}

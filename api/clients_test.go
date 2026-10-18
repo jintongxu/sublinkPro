@@ -592,6 +592,51 @@ func TestResolveClashDialerProxyPrefersChainTargetOverStoredName(t *testing.T) {
 	}
 }
 
+func TestResolveClashDialerProxyUsesPolicySpecificLandingNodes(t *testing.T) {
+	nodes := []models.Node{
+		{ID: 1, Name: "target-a", LinkName: "target-a", DialerProxyName: "node-default"},
+		{ID: 2, Name: "target-b", LinkName: "target-b", DialerProxyName: "node-default"},
+		{ID: 3, Name: "front-a", LinkName: "front-a"},
+		{ID: 4, Name: "front-b", LinkName: "front-b"},
+	}
+	names := map[int]string{1: "target-a", 2: "target-b", 3: "front-a", 4: "front-b"}
+	rules := []models.SubscriptionChainRule{
+		{
+			Name: "policy-a", Enabled: true,
+			ChainConfig:  `[{"type":"specified_node","nodeId":3}]`,
+			TargetConfig: `{"type":"specified_nodes","nodeIds":[1]}`,
+		},
+		{
+			Name: "policy-b", Enabled: true,
+			ChainConfig:  `[{"type":"specified_node","nodeId":4}]`,
+			TargetConfig: `{"type":"specified_nodes","nodeIds":[2]}`,
+		},
+	}
+
+	targetDialers := make(map[int]string)
+	for _, target := range nodes[:2] {
+		result := models.ApplyChainRulesToNodeV2(target, rules, nodes, names)
+		if result == nil {
+			t.Fatalf("expected policy result for node %d", target.ID)
+		}
+		targetDialers[target.ID] = result.FinalDialer
+	}
+	if got := resolveClashDialerProxy(nodes[0], names[1], nil, targetDialers, nil); got != "front-a" {
+		t.Fatalf("node 1 dialer-proxy = %q, want front-a", got)
+	}
+	if got := resolveClashDialerProxy(nodes[1], names[2], nil, targetDialers, nil); got != "front-b" {
+		t.Fatalf("node 2 dialer-proxy = %q, want front-b", got)
+	}
+
+	// A node outside both policies retains its node-level dialer, preserving
+	// compatibility with old specified_node rules and stored settings.
+	fallback := models.Node{ID: 5, Name: "unmatched", LinkName: "unmatched", DialerProxyName: "node-default"}
+	fallbackResult := models.ApplyChainRulesToNodeV2(fallback, rules, nodes, names)
+	if fallbackResult == nil || fallbackResult.FinalDialer != "node-default" {
+		t.Fatalf("unmatched node dialer-proxy = %#v, want node-default", fallbackResult)
+	}
+}
+
 func TestBuildRenamedNodeLinkUsesQualityStatusFields(t *testing.T) {
 	utils.SetProtocolLinkFuncs(protocol.GetProtocolLabelFromLink, protocol.RenameNodeLink)
 	t.Cleanup(func() {

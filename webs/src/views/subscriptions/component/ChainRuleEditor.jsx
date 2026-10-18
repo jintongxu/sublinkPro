@@ -6,6 +6,10 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
 
 import ChainFlowBuilder from './ChainFlowBuilder';
 import MobileChainBuilder from './MobileChainBuilder';
@@ -24,7 +28,8 @@ export default function ChainRuleEditor({
   const [name, setName] = useState(value?.name || '');
   const [enabled, setEnabled] = useState(value?.enabled ?? true);
   const [chainConfig, setChainConfig] = useState([]);
-  const [targetConfig, setTargetConfig] = useState({ type: 'specified_node', conditions: null, nodeId: undefined });
+  const [targetConfig, setTargetConfig] = useState({ type: 'specified_nodes', conditions: null, nodeIds: [] });
+  const [priority, setPriority] = useState(value?.sort ?? 0);
 
   const skipNextUpdate = useRef(false);
 
@@ -32,6 +37,7 @@ export default function ChainRuleEditor({
     if (value && !skipNextUpdate.current) {
       setName(value.name || '');
       setEnabled(value.enabled ?? true);
+      setPriority(value.sort ?? 0);
 
       if (value.chainConfig) {
         try {
@@ -48,32 +54,35 @@ export default function ChainRuleEditor({
         try {
           const parsed = typeof value.targetConfig === 'string' ? JSON.parse(value.targetConfig) : value.targetConfig;
           setTargetConfig({
-            type: parsed.type || 'specified_node',
+            type: parsed.type || 'specified_nodes',
             conditions: parsed.conditions || null,
             nodeId: parsed.nodeId,
+            nodeIds: Array.isArray(parsed.nodeIds) ? parsed.nodeIds : parsed.nodeId ? [parsed.nodeId] : [],
             endPosition: parsed.endPosition
           });
         } catch {
-          setTargetConfig({ type: 'specified_node', conditions: null, nodeId: undefined });
+          setTargetConfig({ type: 'specified_nodes', conditions: null, nodeIds: [] });
         }
       } else {
-        setTargetConfig({ type: 'specified_node', conditions: null, nodeId: undefined });
+        setTargetConfig({ type: 'specified_nodes', conditions: null, nodeIds: [] });
       }
     }
     skipNextUpdate.current = false;
   }, [value]);
 
   const notifyChange = useCallback(
-    (newName, newEnabled, newChainConfig, newTargetConfig) => {
+    (newName, newEnabled, newPriority, newChainConfig, newTargetConfig) => {
       skipNextUpdate.current = true;
       const output = {
         name: newName,
         enabled: newEnabled,
+        sort: Number(newPriority) || 0,
         chainConfig: JSON.stringify(newChainConfig),
         targetConfig: JSON.stringify({
           type: newTargetConfig.type,
           conditions: newTargetConfig.type === 'conditions' ? newTargetConfig.conditions : undefined,
           nodeId: newTargetConfig.type === 'specified_node' ? newTargetConfig.nodeId : undefined,
+          nodeIds: newTargetConfig.type === 'specified_nodes' ? newTargetConfig.nodeIds : undefined,
           endPosition: newTargetConfig.endPosition
         })
       };
@@ -86,34 +95,34 @@ export default function ChainRuleEditor({
     (e) => {
       const newName = e.target.value;
       setName(newName);
-      notifyChange(newName, enabled, chainConfig, targetConfig);
+      notifyChange(newName, enabled, priority, chainConfig, targetConfig);
     },
-    [enabled, chainConfig, targetConfig, notifyChange]
+    [enabled, priority, chainConfig, targetConfig, notifyChange]
   );
 
   const handleEnabledChange = useCallback(
     (e) => {
       const newEnabled = e.target.checked;
       setEnabled(newEnabled);
-      notifyChange(name, newEnabled, chainConfig, targetConfig);
+      notifyChange(name, newEnabled, priority, chainConfig, targetConfig);
     },
-    [name, chainConfig, targetConfig, notifyChange]
+    [name, priority, chainConfig, targetConfig, notifyChange]
   );
 
   const handleChainConfigChange = useCallback(
     (newConfig) => {
       setChainConfig(newConfig);
-      notifyChange(name, enabled, newConfig, targetConfig);
+      notifyChange(name, enabled, priority, newConfig, targetConfig);
     },
-    [name, enabled, targetConfig, notifyChange]
+    [name, enabled, priority, targetConfig, notifyChange]
   );
 
   const handleTargetConfigChange = useCallback(
     (newConfig) => {
       setTargetConfig(newConfig);
-      notifyChange(name, enabled, chainConfig, newConfig);
+      notifyChange(name, enabled, priority, chainConfig, newConfig);
     },
-    [name, enabled, chainConfig, notifyChange]
+    [name, enabled, priority, chainConfig, notifyChange]
   );
 
   return (
@@ -129,6 +138,23 @@ export default function ChainRuleEditor({
             placeholder={t('subscriptions.chain.ruleNamePlaceholder')}
             fullWidth={isMobile}
           />
+          <FormControl
+            size="small"
+            sx={{ minWidth: 110 }}
+          >
+            <InputLabel>{t('subscriptions.chain.priority', '优先级')}</InputLabel>
+            <Select
+              value={priority}
+              label={t('subscriptions.chain.priority', '优先级')}
+              onChange={(event) => {
+                const nextPriority = Number(event.target.value);
+                setPriority(nextPriority);
+                notifyChange(name, enabled, nextPriority, chainConfig, targetConfig);
+              }}
+            >
+              {[0, 10, 20, 50, 100].map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
+            </Select>
+          </FormControl>
           <FormControlLabel
             control={<Switch checked={enabled} onChange={handleEnabledChange} />}
             label={t('common.enabled')}

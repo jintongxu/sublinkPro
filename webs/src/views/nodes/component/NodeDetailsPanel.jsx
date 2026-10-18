@@ -8,6 +8,7 @@ import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
 
 import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
@@ -28,6 +29,7 @@ import PublicIcon from '@mui/icons-material/Public';
 import FolderIcon from '@mui/icons-material/Folder';
 import SourceIcon from '@mui/icons-material/Source';
 import LinkIcon from '@mui/icons-material/Link';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import RouterIcon from '@mui/icons-material/Router';
 import FilterVintageIcon from '@mui/icons-material/FilterVintage';
 import VpnLockIcon from '@mui/icons-material/VpnLock';
@@ -159,6 +161,8 @@ const DetailItem = ({ icon, label, value, isLink, onClick, secondary, noBorder }
 export default function NodeDetailsPanel({
   open,
   node,
+  referenceNodes,
+  loadingReferenceNodes,
   tagColorMap,
   protocolMeta,
   onClose,
@@ -193,6 +197,17 @@ export default function NodeDetailsPanel({
   const nameModeHint = usesRemarkName && node.LinkName ? t('nodes.details.nameHints.original', { name: node.LinkName }) : '';
   const remarkHint =
     !usesRemarkName && node.Name && node.Name !== effectiveName ? t('nodes.details.nameHints.remark', { name: node.Name }) : '';
+  const nodeAliases = new Set([node.EffectiveName, node.Name, node.LinkName].filter(Boolean).map((name) => name.trim()));
+  const dialerProxyTarget = (referenceNodes || []).find(
+    (candidate) =>
+      candidate.ID !== node.ID &&
+      [candidate.EffectiveName, candidate.Name, candidate.LinkName].filter(Boolean).some((name) => name.trim() === node.DialerProxyName?.trim())
+  );
+  const referencedByNodes = (referenceNodes || []).filter((candidate) => {
+    if (candidate.ID === node.ID || !candidate.DialerProxyName) return false;
+    return nodeAliases.has(candidate.DialerProxyName.trim());
+  });
+  const getReferenceNodeName = (candidate) => candidate.EffectiveName || candidate.Name || candidate.LinkName || t('nodes.common.unknownNode');
 
   const delayStyles = getNodeStatusMetricSx(tokens, delayDisplay.color);
   const speedStyles = getNodeStatusMetricSx(tokens, speedDisplay.color);
@@ -424,8 +439,52 @@ export default function NodeDetailsPanel({
             value={node.Source === 'manual' ? t('nodes.details.values.manualAdd') : node.Source}
           />
           {node.DialerProxyName && (
-            <DetailItem icon={<LinkIcon fontSize="small" />} label={t('nodes.details.labels.dialerProxy')} value={node.DialerProxyName} />
+            <DetailItem
+              icon={<LinkIcon fontSize="small" />}
+              label={t('nodes.details.labels.dialerProxy')}
+              value={dialerProxyTarget ? getReferenceNodeName(dialerProxyTarget) : node.DialerProxyName}
+              secondary={
+                dialerProxyTarget
+                  ? t('nodes.details.values.dialerProxyReference', { name: node.DialerProxyName })
+                  : t('nodes.details.values.dialerProxyUnresolved')
+              }
+            />
           )}
+
+          <ListItem disablePadding sx={{ py: 1.5, borderBottom: '1px dashed', borderColor: 'divider', display: 'block' }}>
+            <Stack direction="row" alignItems="flex-start" spacing={2} width="100%">
+              <Avatar
+                sx={{
+                  width: 36,
+                  height: 36,
+                  bgcolor: (theme) => alpha(theme.palette.info.main, 0.08),
+                  color: 'info.main',
+                  borderRadius: 2,
+                  mt: 0.5
+                }}
+              >
+                <AccountTreeIcon fontSize="small" />
+              </Avatar>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
+                  {t('nodes.details.labels.referencedBy')}
+                </Typography>
+                {loadingReferenceNodes ? (
+                  <CircularProgress size={18} />
+                ) : referencedByNodes.length > 0 ? (
+                  <Stack direction="row" flexWrap="wrap" gap={0.8}>
+                    {referencedByNodes.map((candidate) => (
+                      <Chip key={candidate.ID} label={getReferenceNodeName(candidate)} size="small" color="info" variant="outlined" />
+                    ))}
+                  </Stack>
+                ) : (
+                  <Typography variant="body2" color="text.disabled">
+                    {t('nodes.details.values.noReferences')}
+                  </Typography>
+                )}
+              </Box>
+            </Stack>
+          </ListItem>
 
           {node.Tags && (
             <ListItem disablePadding sx={{ py: 1.5, borderBottom: '1px dashed', borderColor: 'divider', display: 'block' }}>
@@ -743,6 +802,8 @@ export default function NodeDetailsPanel({
 NodeDetailsPanel.propTypes = {
   open: PropTypes.bool.isRequired,
   node: PropTypes.object,
+  referenceNodes: PropTypes.array,
+  loadingReferenceNodes: PropTypes.bool,
   tagColorMap: PropTypes.object,
   protocolMeta: PropTypes.array, // 协议元数据列表（从后端获取）
   onClose: PropTypes.func.isRequired,

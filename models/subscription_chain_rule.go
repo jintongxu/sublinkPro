@@ -44,9 +44,10 @@ type URLTestConfig struct {
 
 // TargetConfig 目标节点条件配置
 type TargetConfig struct {
-	Type       string         `json:"type"`                 // all, conditions, specified_node
+	Type       string         `json:"type"`                 // all, conditions, specified_node, specified_nodes
 	Conditions *TagConditions `json:"conditions,omitempty"` // 条件表达式
 	NodeID     int            `json:"nodeId,omitempty"`     // 指定节点ID (仅 specified_node)
+	NodeIDs    []int          `json:"nodeIds,omitempty"`    // 指定节点ID集合 (仅 specified_nodes)
 }
 
 // CustomProxyGroup 自定义代理组（用于生成到 Clash 配置）
@@ -171,6 +172,23 @@ func ValidateChainRule(rule *SubscriptionChainRule, subscriptionNodes []Node, ex
 	case "specified_node":
 		if target.NodeID <= 0 || !nodeIDs[target.NodeID] {
 			return fmt.Errorf("目标节点不属于当前订阅")
+		}
+	case "specified_nodes":
+		if len(target.NodeIDs) == 0 {
+			return fmt.Errorf("目标节点集合不能为空")
+		}
+		targetSeen := make(map[int]bool, len(target.NodeIDs))
+		for _, nodeID := range target.NodeIDs {
+			if nodeID <= 0 || !nodeIDs[nodeID] {
+				return fmt.Errorf("目标节点 %d 不属于当前订阅", nodeID)
+			}
+			if targetSeen[nodeID] {
+				return fmt.Errorf("目标节点集合中重复引用节点 ID %d", nodeID)
+			}
+			if seenNodes[nodeID] {
+				return fmt.Errorf("目标节点不能引用链路中的节点 %d", nodeID)
+			}
+			targetSeen[nodeID] = true
 		}
 	default:
 		return fmt.Errorf("目标类型无效: %s", target.Type)
@@ -320,6 +338,13 @@ func (r *SubscriptionChainRule) MatchTargetCondition(node Node) bool {
 		return true
 	case "specified_node":
 		return node.ID == target.NodeID
+	case "specified_nodes":
+		for _, nodeID := range target.NodeIDs {
+			if node.ID == nodeID {
+				return true
+			}
+		}
+		return false
 	case "conditions":
 		if target.Conditions == nil {
 			return false

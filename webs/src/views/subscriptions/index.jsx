@@ -36,6 +36,7 @@ import {
 } from 'api/subscriptions';
 import { getNodeCheckMeta } from 'api/nodeCheck';
 import {
+  getNodes,
   getNodeSelector,
   getNodeSelectorByIds,
   getNodeGroupStats,
@@ -193,6 +194,11 @@ export default function SubscriptionList() {
   const [availableNodesTotal, setAvailableNodesTotal] = useState(0);
   const [availableNodesLoading, setAvailableNodesLoading] = useState(false);
   const [selectedNodeMap, setSelectedNodeMap] = useState({});
+  const [nodeCatalog, setNodeCatalog] = useState([]);
+  const [explicitNodeIds, setExplicitNodeIds] = useState([]);
+  const explicitNodeIdsRef = useRef([]);
+  const selectionUpdateQueueRef = useRef(Promise.resolve());
+  const selectionGenerationRef = useRef(0);
   const [groupNodeCounts, setGroupNodeCounts] = useState({});
   const [allNodeTotal, setAllNodeTotal] = useState(0);
 
@@ -260,6 +266,39 @@ export default function SubscriptionList() {
       });
       return next;
     });
+  }, []);
+
+  const fetchNodeCatalog = useCallback(async () => {
+    if (nodeCatalog.length > 0) return nodeCatalog;
+    const response = await getNodes({});
+    const items = response.data || [];
+    setNodeCatalog(items);
+    hydrateSelectedNodeMap(items);
+    return items;
+  }, [hydrateSelectedNodeMap, nodeCatalog]);
+
+  const deriveExplicitNodeIds = useCallback((nodes) => {
+    const items = Array.isArray(nodes) ? nodes : [];
+    const aliasToIds = new Map();
+    items.forEach((node) => {
+      [node.EffectiveName, node.Name, node.LinkName].filter(Boolean).forEach((name) => {
+        const key = name.trim();
+        if (!key) return;
+        const ids = aliasToIds.get(key) || new Set();
+        ids.add(Number(node.ID));
+        aliasToIds.set(key, ids);
+      });
+    });
+    const dependencyIds = new Set();
+    items.forEach((node) => {
+      const nodeId = Number(node.ID);
+      const proxyName = node.DialerProxyName?.trim();
+      const matches = proxyName ? aliasToIds.get(proxyName) : null;
+      const distinctMatches = matches ? new Set([...matches].filter((id) => id !== nodeId)) : new Set();
+      if (distinctMatches.size === 1) dependencyIds.add([...distinctMatches][0]);
+    });
+    const roots = items.map((node) => Number(node.ID)).filter((id) => !dependencyIds.has(id));
+    return roots.length > 0 ? roots : items.map((node) => Number(node.ID));
   }, []);
 
   const fetchNodeSelector = useCallback(async () => {
@@ -351,7 +390,8 @@ export default function SubscriptionList() {
           Source: node.Source,
           LinkCountry: node.LinkCountry,
           UnlockSummary: node.UnlockSummary,
-          UnlockCheckAt: node.UnlockCheckAt
+          UnlockCheckAt: node.UnlockCheckAt,
+          DialerProxyName: node.DialerProxyName
         };
       });
       return next;
@@ -576,6 +616,9 @@ export default function SubscriptionList() {
       unlockRules: [],
       refreshUsageOnRequest: true
     });
+    explicitNodeIdsRef.current = [];
+    setExplicitNodeIds([]);
+    setNodeCatalog([]);
     setNodeGroupFilter('all');
     setNodeSourceFilter('all');
     setNodeSearchQuery('');
@@ -600,11 +643,14 @@ export default function SubscriptionList() {
       }
     })();
 
-    const nodes = sub.Nodes?.map((n) => n.ID) || [];
+    const persistedNodes = sub.Nodes || [];
+    const nodes = persistedNodes.map((n) => n.ID) || [];
+    const rootNodeIds = deriveExplicitNodeIds(persistedNodes);
+    explicitNodeIdsRef.current = rootNodeIds;
+    setExplicitNodeIds(rootNodeIds);
     const groups = (sub.Groups || []).map((g) => (typeof g === 'string' ? g : g.Name));
     const airports = (sub.Airports || []).map((airport) => getAirportId(airport)).filter((id) => Number.isInteger(id) && id > 0);
     const scriptIds = (sub.Scripts || []).map((s) => s.id);
-
     let mode = 'nodes';
     if (nodes.length > 0 && (groups.length > 0 || airports.length > 0)) {
       mode = 'mixed';
@@ -612,6 +658,7 @@ export default function SubscriptionList() {
       mode = 'groups';
     }
 
+    const expandedNodeIds = nodes;
     setFormData({
       name: sub.Name,
       clash: config?.clash || './template/clash.yaml',
@@ -620,7 +667,7 @@ export default function SubscriptionList() {
       cert: config?.cert || false,
       replaceServerWithHost: config?.replaceServerWithHost || false,
       selectionMode: mode,
-      selectedNodes: nodes,
+      selectedNodes: expandedNodeIds,
       selectedGroups: groups,
       selectedAirports: airports,
       selectedScripts: scriptIds,
@@ -663,8 +710,17 @@ export default function SubscriptionList() {
     setNodeSourceFilter('all');
     setNodeSearchQuery('');
     setNodeCountryFilter([]);
+    setNodeCatalog([]);
     syncSelectedNodeMapFromList(sub.Nodes || []);
     setDialogOpen(true);
+    const editGeneration = ++selectionGenerationRef.current;
+    selectionUpdateQueueRef.current = selectionUpdateQueueRef.current.catch(() => {}).then(async () => {
+      const expandedNodeIds = await expandNodeDependencies(rootNodeIds);
+      if (editGeneration !== selectionGenerationRef.current) return;
+      setFormData((prev) => ({ ...prev, selectedNodes: expandedNodeIds }));
+      await fetchSelectedNodeDetails(expandedNodeIds);
+    });
+    selectionUpdateQueueRef.current.catch((error) => console.error('展开订阅前置节点失败:', error));
     refreshNodeSelector();
   };
 
@@ -778,22 +834,68 @@ export default function SubscriptionList() {
   };
 
   // 节点选择操作（使用 node.ID）
-  const handleAddNode = (nodeId) => {
-    if (formData.selectedNodes.includes(nodeId)) return;
-    const nextSelected = [...formData.selectedNodes, nodeId];
-    setFormData({ ...formData, selectedNodes: nextSelected });
-    setCheckedAvailable(checkedAvailable.filter((id) => id !== nodeId));
-    void fetchSelectedNodeDetails(nextSelected);
+  const applyExplicitNodeIds = (nextExplicitIds) => {
+    const normalizedExplicitIds = Array.from(new Set(nextExplicitIds.map(Number).filter((id) => Number.isInteger(id) && id > 0)));
+    const generation = ++selectionGenerationRef.current;
+    selectionUpdateQueueRef.current = selectionUpdateQueueRef.current.catch(() => {}).then(async () => {
+      const nextSelected = await expandNodeDependencies(normalizedExplicitIds);
+      if (generation !== selectionGenerationRef.current) return;
+      explicitNodeIdsRef.current = normalizedExplicitIds;
+      setExplicitNodeIds(normalizedExplicitIds);
+      setFormData((prev) => ({ ...prev, selectedNodes: nextSelected }));
+      await fetchSelectedNodeDetails(nextSelected);
+    });
+    return selectionUpdateQueueRef.current;
   };
 
-  const handleRemoveNode = (nodeId) => {
-    setFormData({ ...formData, selectedNodes: formData.selectedNodes.filter((id) => id !== nodeId) });
+  const handleAddNode = async (nodeId) => {
+    if (explicitNodeIdsRef.current.includes(nodeId)) return;
+    await applyExplicitNodeIds([...explicitNodeIdsRef.current, nodeId]);
+    setCheckedAvailable(checkedAvailable.filter((id) => id !== nodeId));
+  };
+
+  const handleRemoveNode = async (nodeId) => {
+    await applyExplicitNodeIds(explicitNodeIdsRef.current.filter((id) => id !== nodeId));
     setCheckedSelected(checkedSelected.filter((id) => id !== nodeId));
   };
 
   const selectedNodesList = useMemo(() => {
-    return formData.selectedNodes.map((id) => selectedNodeMap[id]).filter(Boolean);
-  }, [formData.selectedNodes, selectedNodeMap]);
+    return explicitNodeIds.map((id) => selectedNodeMap[id]).filter(Boolean);
+  }, [explicitNodeIds, selectedNodeMap]);
+
+  const expandNodeDependencies = useCallback(
+    async (rootIds) => {
+      const catalog = await fetchNodeCatalog();
+      const nodesById = new Map(catalog.map((node) => [Number(node.ID), node]));
+      const aliases = new Map();
+      catalog.forEach((node) => {
+        [node.EffectiveName, node.Name, node.LinkName].filter(Boolean).forEach((name) => {
+          const key = name.trim();
+          const ids = aliases.get(key) || new Set();
+          ids.add(Number(node.ID));
+          aliases.set(key, ids);
+        });
+      });
+      const expanded = [];
+      const visited = new Set();
+      const visit = (nodeId) => {
+        const normalizedId = Number(nodeId);
+        if (visited.has(normalizedId)) return;
+        visited.add(normalizedId);
+        const node = nodesById.get(normalizedId);
+        const proxyName = node?.DialerProxyName?.trim();
+        const proxyIds = proxyName ? aliases.get(proxyName) : undefined;
+        if (proxyIds?.size === 1) {
+          const [proxyId] = proxyIds;
+          if (proxyId !== normalizedId) visit(proxyId);
+        }
+        expanded.push(normalizedId);
+      };
+      rootIds.forEach(visit);
+      return expanded;
+    },
+    [fetchNodeCatalog]
+  );
 
   const availableNodeCount = availableNodesTotal || availableNodes.length;
 
@@ -801,10 +903,8 @@ export default function SubscriptionList() {
     try {
       const response = await getNodeIds(buildNodeFilterParams());
       const matchedIds = response.data || [];
-      const newNodes = Array.from(new Set([...formData.selectedNodes, ...matchedIds]));
-      setFormData({ ...formData, selectedNodes: newNodes });
+      await applyExplicitNodeIds(Array.from(new Set([...explicitNodeIdsRef.current, ...matchedIds])));
       setCheckedAvailable([]);
-      await fetchSelectedNodeDetails(newNodes);
     } catch (error) {
       console.error(error);
       showMessage(error.message || '批量添加节点失败', 'error');
@@ -812,7 +912,10 @@ export default function SubscriptionList() {
   };
 
   const handleRemoveAll = () => {
-    setFormData({ ...formData, selectedNodes: [] });
+    selectionGenerationRef.current += 1;
+    explicitNodeIdsRef.current = [];
+    setExplicitNodeIds([]);
+    setFormData((prev) => ({ ...prev, selectedNodes: [] }));
     setCheckedSelected([]);
   };
 
@@ -833,16 +936,13 @@ export default function SubscriptionList() {
     }
   };
 
-  const handleAddChecked = () => {
-    const newNodes = Array.from(new Set([...formData.selectedNodes, ...checkedAvailable]));
-    setFormData({ ...formData, selectedNodes: newNodes });
+  const handleAddChecked = async () => {
+    await applyExplicitNodeIds(Array.from(new Set([...explicitNodeIdsRef.current, ...checkedAvailable])));
     setCheckedAvailable([]);
-    void fetchSelectedNodeDetails(newNodes);
   };
 
-  const handleRemoveChecked = () => {
-    const newNodes = formData.selectedNodes.filter((id) => !checkedSelected.includes(id));
-    setFormData({ ...formData, selectedNodes: newNodes });
+  const handleRemoveChecked = async () => {
+    await applyExplicitNodeIds(explicitNodeIdsRef.current.filter((id) => !checkedSelected.includes(id)));
     setCheckedSelected([]);
   };
 

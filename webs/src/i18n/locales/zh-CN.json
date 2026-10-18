@@ -105,6 +105,7 @@
       "nodes": "节点管理",
       "nodeCheck": "节点检测",
       "subscriptions": "订阅列表",
+      "chainProxy": "链式代理",
       "templates": "模板管理",
       "tags": "标签管理",
       "scripts": "脚本列表",
@@ -1935,6 +1936,7 @@
       "labels": {
         "source": "来源",
         "dialerProxy": "前置代理",
+        "referencedBy": "引用关系",
         "tags": "标签",
         "countryRegion": "国家/地区",
         "landingIP": "落地 IP",
@@ -1945,7 +1947,10 @@
         "updatedAt": "更新时间"
       },
       "values": {
-        "manualAdd": "手动添加"
+        "manualAdd": "手动添加",
+        "dialerProxyReference": "引用名称：{{name}}",
+        "dialerProxyUnresolved": "未匹配到节点，可能是策略组名称",
+        "noReferences": "暂无其他节点引用此节点"
       },
       "rawProtocolInfo": "原始协议信息",
       "viewIpDetails": "点击查看 IP 详细信息",
@@ -2287,6 +2292,9 @@
       "protocol": "协议",
       "group": "分组",
       "source": "来源",
+      "dialerProxy": "前置",
+      "dialerProxyUsage": "使用：{{name}}",
+      "referencedBy": "引用：{{names}}",
       "tags": "标签",
       "country": "国家",
       "delay": "延迟",
@@ -2355,6 +2363,17 @@
         "inactive": "当前未启用解锁筛选。点击下方按钮后再添加具体规则。",
         "addRule": "新增解锁规则"
       }
+    }
+  },
+  "chainProxy": {
+    "page": {
+      "title": "链式代理管理",
+      "subtitle": "集中管理各订阅的链式代理策略",
+      "description": "选择订阅后，在此查看和配置所有链式代理规则。",
+      "subscription": "选择订阅",
+      "manage": "管理策略",
+      "empty": "暂无订阅，请先创建订阅。",
+      "currentSubscription": "当前订阅：{{name}}"
     }
   },
   "subscriptions": {
@@ -2626,6 +2645,9 @@
       "emptyRulesDescription": "链式代理可以为节点配置入口代理，实现流量中转",
       "addRule": "添加规则",
       "previewFullChain": "预览整体链路",
+      "priority": "优先级",
+      "landingNodes": "落地节点",
+      "landingNodesPlaceholder": "选择策略适用的落地节点",
       "backToList": "返回列表",
       "saveRule": "保存规则",
       "proxyType": "代理类型",
@@ -2681,11 +2703,13 @@
       "targetTypes": {
         "all": "所有节点",
         "specified_node": "指定节点",
+        "specified_nodes": "指定节点集合",
         "conditions": "按条件"
       },
       "noNodeSelected": "未选择节点",
       "targetTooltips": {
         "specified": "手动指定唯一一个目标节点",
+        "specifiedNodes": "选择多个落地节点",
         "all": "规则应用于所有节点",
         "conditions": "根据条件筛选节点"
       },
@@ -2743,7 +2767,8 @@
         "table": {
           "node": "节点",
           "matchedRule": "匹配规则",
-          "entryProxy": "入口代理"
+          "entryProxy": "入口代理",
+          "finalDialer": "最终前置"
         }
       }
     },

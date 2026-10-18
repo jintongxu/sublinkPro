@@ -543,6 +543,9 @@ function NodeMatchTable({ matchSummary, isMobile }) {
               <TableCell sx={{ bgcolor: tableHeaderSurface, color: secondaryText }}>
                 {t('subscriptions.chain.preview.table.entryProxy')}
               </TableCell>
+              <TableCell sx={{ bgcolor: tableHeaderSurface, color: secondaryText }}>
+                {t('subscriptions.chain.preview.table.finalDialer', '最终前置')}
+              </TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -576,6 +579,9 @@ function NodeMatchTable({ matchSummary, isMobile }) {
                       -
                     </Typography>
                   )}
+                </TableCell>
+                <TableCell>
+                  {node.finalDialer ? <Typography variant="body2">{node.finalDialer}</Typography> : <Typography variant="caption" sx={{ color: tertiaryText }}>-</Typography>}
                 </TableCell>
               </TableRow>
             ))}

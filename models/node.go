@@ -61,31 +61,33 @@ type Node struct {
 }
 
 type NodeSelectorItem struct {
-	ID            int
-	Name          string
-	LinkName      string
-	NameMode      string
-	EffectiveName string
-	Group         string
-	Source        string
-	LinkCountry   string
-	UnlockSummary string
-	UnlockCheckAt string
+	ID              int
+	Name            string
+	LinkName        string
+	DialerProxyName string
+	NameMode        string
+	EffectiveName   string
+	Group           string
+	Source          string
+	LinkCountry     string
+	UnlockSummary   string
+	UnlockCheckAt   string
 }
 
 func BuildNodeSelectorItem(node Node) NodeSelectorItem {
 	effectiveName := node.EffectiveName()
 	return NodeSelectorItem{
-		ID:            node.ID,
-		Name:          effectiveName,
-		LinkName:      node.LinkName,
-		NameMode:      NormalizeNodeNameMode(node.NameMode),
-		EffectiveName: effectiveName,
-		Group:         node.Group,
-		Source:        node.Source,
-		LinkCountry:   node.LinkCountry,
-		UnlockSummary: node.UnlockSummary,
-		UnlockCheckAt: node.UnlockCheckAt,
+		ID:              node.ID,
+		Name:            effectiveName,
+		LinkName:        node.LinkName,
+		DialerProxyName: node.DialerProxyName,
+		NameMode:        NormalizeNodeNameMode(node.NameMode),
+		EffectiveName:   effectiveName,
+		Group:           node.Group,
+		Source:          node.Source,
+		LinkCountry:     node.LinkCountry,
+		UnlockSummary:   node.UnlockSummary,
+		UnlockCheckAt:   node.UnlockCheckAt,
 	}
 }
 

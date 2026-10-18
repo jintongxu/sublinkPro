@@ -105,6 +105,7 @@
       "nodes": "Node",
       "nodeCheck": "Node Check",
       "subscriptions": "Subscriptions",
+      "chainProxy": "Chain Proxy",
       "templates": "Templates",
       "tags": "Tags",
       "scripts": "Scripts",
@@ -1935,6 +1936,7 @@
       "labels": {
         "source": "Source",
         "dialerProxy": "Dialer proxy",
+        "referencedBy": "References",
         "tags": "Tags",
         "countryRegion": "Country/Region",
         "landingIP": "Landing IP",
@@ -1945,7 +1947,10 @@
         "updatedAt": "Updated at"
       },
       "values": {
-        "manualAdd": "Manual add"
+        "manualAdd": "Manual add",
+        "dialerProxyReference": "Reference name: {{name}}",
+        "dialerProxyUnresolved": "Node not found; this may be a policy group name",
+        "noReferences": "No other nodes reference this node"
       },
       "rawProtocolInfo": "Raw protocol information",
       "viewIpDetails": "Click to view IP details",
@@ -2287,6 +2292,9 @@
       "protocol": "Protocol",
       "group": "Group",
       "source": "Source",
+      "dialerProxy": "Dialer proxy",
+      "dialerProxyUsage": "Uses: {{name}}",
+      "referencedBy": "Referenced by: {{names}}",
       "tags": "Tags",
       "country": "Country",
       "delay": "Delay",
@@ -2355,6 +2363,17 @@
         "inactive": "Unlock filtering is currently disabled. Add a rule below to enable it.",
         "addRule": "Add unlock rule"
       }
+    }
+  },
+  "chainProxy": {
+    "page": {
+      "title": "Chain Proxy Management",
+      "subtitle": "Manage chain proxy policies across subscriptions",
+      "description": "Select a subscription to view and configure all of its chain proxy rules.",
+      "subscription": "Subscription",
+      "manage": "Manage policies",
+      "empty": "No subscriptions yet. Create a subscription first.",
+      "currentSubscription": "Current subscription: {{name}}"
     }
   },
   "subscriptions": {
@@ -2626,6 +2645,9 @@
       "emptyRulesDescription": "Chain proxy can configure entry proxies for nodes to relay traffic.",
       "addRule": "Add rule",
       "previewFullChain": "Preview full chain",
+      "priority": "Priority",
+      "landingNodes": "Landing nodes",
+      "landingNodesPlaceholder": "Select landing nodes for this strategy",
       "backToList": "Back to list",
       "saveRule": "Save rule",
       "proxyType": "Proxy type",
@@ -2681,11 +2703,13 @@
       "targetTypes": {
         "all": "All nodes",
         "specified_node": "Specified node",
+        "specified_nodes": "Specified node set",
         "conditions": "By conditions"
       },
       "noNodeSelected": "No node selected",
       "targetTooltips": {
         "specified": "Manually specify one target node",
+        "specifiedNodes": "Select multiple landing nodes",
         "all": "Apply this rule to all nodes",
         "conditions": "Filter nodes by conditions"
       },
@@ -2743,7 +2767,8 @@
         "table": {
           "node": "Node",
           "matchedRule": "Matched rule",
-          "entryProxy": "Entry proxy"
+          "entryProxy": "Entry proxy",
+          "finalDialer": "Final dialer"
         }
       }
     },

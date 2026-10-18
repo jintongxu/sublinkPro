@@ -13,6 +13,7 @@ const NodeMapPage = Loadable(lazy(() => import('views/dashboard/NodeMap')));
 // views routing
 const NodeList = Loadable(lazy(() => import('views/nodes')));
 const SubscriptionList = Loadable(lazy(() => import('views/subscriptions')));
+const ChainProxyManagement = Loadable(lazy(() => import('views/chain-proxy')));
 const TemplateList = Loadable(lazy(() => import('views/templates')));
 const ScriptList = Loadable(lazy(() => import('views/scripts')));
 const AccessKeyList = Loadable(lazy(() => import('views/accesskeys')));
@@ -72,6 +73,10 @@ const MainRoutes = {
         {
           path: 'subs',
           element: <SubscriptionList />
+        },
+        {
+          path: 'chain-proxy',
+          element: <ChainProxyManagement />
         },
         {
           path: 'templates',

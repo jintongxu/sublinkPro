@@ -829,7 +829,7 @@ export default function ChainFlowBuilder({
           exclusive
           onChange={(_event, newType) => {
             if (newType !== null) {
-              setEditingTargetConfig({ ...editingTargetConfig, type: newType, nodeId: undefined, conditions: undefined });
+              setEditingTargetConfig({ ...editingTargetConfig, type: newType, nodeId: undefined, nodeIds: [], conditions: undefined });
             }
           }}
           size="small"
@@ -838,6 +838,9 @@ export default function ChainFlowBuilder({
         >
           <Tooltip title={t('subscriptions.chain.targetTooltips.specified')} arrow>
             <ToggleButton value="specified_node">{t('subscriptions.chain.targetTypes.specified_node')}</ToggleButton>
+          </Tooltip>
+          <Tooltip title={t('subscriptions.chain.targetTooltips.specifiedNodes', '选择多个落地节点')} arrow>
+            <ToggleButton value="specified_nodes">{t('subscriptions.chain.targetTypes.specified_nodes', '指定节点集合')}</ToggleButton>
           </Tooltip>
           <Tooltip title={t('subscriptions.chain.targetTooltips.all')} arrow>
             <ToggleButton value="all">{t('subscriptions.chain.targetTypes.all')}</ToggleButton>
@@ -866,6 +869,25 @@ export default function ChainFlowBuilder({
                   <Chip label={option.protocol || 'unknown'} size="small" color="info" variant="outlined" />
                 </Stack>
               </li>
+            )}
+          />
+        )}
+
+        {editingTargetConfig.type === 'specified_nodes' && (
+          <Autocomplete
+            multiple
+            size="small"
+            options={availableNodes || []}
+            sx={fieldControlSx}
+            value={(availableNodes || []).filter((n) => editingTargetConfig.nodeIds?.includes(n.id))}
+            onChange={(_event, selected) => setEditingTargetConfig({ ...editingTargetConfig, nodeIds: selected.map((node) => node.id) })}
+            getOptionLabel={(option) => `${option.name || option.linkName} (${option.linkCountry || t('common.unknown')})`}
+            isOptionEqualToValue={(option, selected) => option.id === selected.id}
+            renderTags={(selected, getTagProps) => selected.map((option, index) => (
+              <Chip {...getTagProps({ index })} key={option.id} label={option.name || option.linkName} size="small" />
+            ))}
+            renderInput={(params) => (
+              <TextField {...params} label={t('subscriptions.chain.landingNodes', '落地节点')} placeholder={t('subscriptions.chain.landingNodesPlaceholder', '选择策略适用的落地节点')} />
             )}
           />
         )}

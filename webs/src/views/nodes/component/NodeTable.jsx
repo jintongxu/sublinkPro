@@ -6,6 +6,7 @@ import { alpha, useTheme } from '@mui/material/styles';
 import Box from '@mui/material/Box';
 import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
@@ -57,6 +58,8 @@ export default function NodeTable({
   sortOrder,
   tagColorMap,
   protocolMeta,
+  referenceNodes,
+  loadingReferenceNodes,
   columnWidths,
   onSelect,
   onSort,
@@ -375,6 +378,19 @@ export default function NodeTable({
               </TableCell>
               <TableCell
                 sx={{
+                  width: columnWidths.dialerProxy,
+                  minWidth: 100,
+                  whiteSpace: 'nowrap',
+                  position: 'relative',
+                  bgcolor: resizing?.columnKey === 'dialerProxy' ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
+                  transition: 'background-color 0.15s ease'
+                }}
+              >
+                {t('nodes.table.dialerProxy')}
+                <ResizeHandle columnKey="dialerProxy" />
+              </TableCell>
+              <TableCell
+                sx={{
                   width: columnWidths.tags,
                   minWidth: 60,
                   whiteSpace: 'nowrap',
@@ -557,6 +573,66 @@ export default function NodeTable({
                         {t('nodes.table.manualSource')}
                       </Typography>
                     )}
+                  </TableCell>
+                  <TableCell
+                    sx={{
+                      width: columnWidths.dialerProxy,
+                      maxWidth: columnWidths.dialerProxy,
+                      minWidth: 100,
+                      whiteSpace: 'normal'
+                    }}
+                  >
+                    {(() => {
+                      const nodeAliases = new Set([node.EffectiveName, node.Name, node.LinkName].filter(Boolean).map((name) => name.trim()));
+                      const proxyTarget = (referenceNodes || []).find(
+                        (candidate) =>
+                          candidate.ID !== node.ID &&
+                          [candidate.EffectiveName, candidate.Name, candidate.LinkName]
+                            .filter(Boolean)
+                            .some((name) => name.trim() === node.DialerProxyName?.trim())
+                      );
+                      const referencedBy = (referenceNodes || []).filter(
+                        (candidate) =>
+                          candidate.ID !== node.ID &&
+                          candidate.DialerProxyName &&
+                          nodeAliases.has(candidate.DialerProxyName.trim())
+                      );
+                      const getReferenceName = (candidate) => candidate.EffectiveName || candidate.Name || candidate.LinkName || t('nodes.common.unknownNode');
+
+                      if (loadingReferenceNodes) {
+                        return <CircularProgress size={16} />;
+                      }
+
+                      if (!node.DialerProxyName) {
+                        return null;
+                      }
+
+                      return (
+                        <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                          {node.DialerProxyName && (
+                            <Tooltip title={node.DialerProxyName}>
+                              <Typography
+                                variant="body2"
+                                sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}
+                              >
+                                {t('nodes.table.dialerProxyUsage', { name: proxyTarget ? getReferenceName(proxyTarget) : node.DialerProxyName })}
+                              </Typography>
+                            </Tooltip>
+                          )}
+                          {referencedBy.length > 0 && (
+                            <Tooltip title={referencedBy.map(getReferenceName).join(', ')}>
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}
+                              >
+                                {t('nodes.table.referencedBy', { names: referencedBy.map(getReferenceName).join(', ') })}
+                              </Typography>
+                            </Tooltip>
+                          )}
+                        </Stack>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell>
                     {node.Tags ? (
@@ -824,6 +900,8 @@ NodeTable.propTypes = {
   sortOrder: PropTypes.string.isRequired,
   tagColorMap: PropTypes.object,
   protocolMeta: PropTypes.array,
+  referenceNodes: PropTypes.array,
+  loadingReferenceNodes: PropTypes.bool,
   columnWidths: PropTypes.object.isRequired,
   onSelect: PropTypes.func.isRequired,
   onSort: PropTypes.func.isRequired,
