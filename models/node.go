@@ -1927,6 +1927,7 @@ type NodeInfoUpdate struct {
 	ClashExtra      string
 	SourceSort      int
 	Source          string
+	Group           string
 	CurrentName     string
 	CurrentLinkName string
 	NameMode        string
@@ -1941,6 +1942,7 @@ func BuildNodeInfoUpdate(existing Node, linkName string, link string, sourceSort
 		Link:            link,
 		SourceSort:      sourceSort,
 		Source:          existing.Source,
+		Group:           existing.Group,
 		CurrentName:     existing.Name,
 		CurrentLinkName: existing.LinkName,
 		NameMode:        NormalizeNodeNameMode(existing.NameMode),
@@ -1981,6 +1983,8 @@ type nodeInfoUpdatePlan struct {
 	ClashExtra string
 	LinkHash   string
 	SourceSort int
+	Source     string
+	Group      string
 	UpdatedAt  time.Time
 }
 
@@ -2102,6 +2106,8 @@ func prepareNodeInfoUpdatePlan(update NodeInfoUpdate, nameState *nodeInfoNameSta
 		ClashExtra: update.ClashExtra,
 		LinkHash:   hashNodeLink(update.Link),
 		SourceSort: update.SourceSort,
+		Source:     update.Source,
+		Group:      update.Group,
 		UpdatedAt:  updatedAt,
 	}
 }
@@ -2147,6 +2153,8 @@ func tryBatchUpdateNodeInfoWithCaseWhen(plans []nodeInfoUpdatePlan) (int, error)
 	appendCaseColumn("clash_extra", func(plan nodeInfoUpdatePlan) any { return plan.ClashExtra })
 	appendCaseColumn("link_hash", func(plan nodeInfoUpdatePlan) any { return plan.LinkHash })
 	appendCaseColumn("source_sort", func(plan nodeInfoUpdatePlan) any { return plan.SourceSort })
+	appendCaseColumn("source", func(plan nodeInfoUpdatePlan) any { return plan.Source })
+	appendCaseColumn(quoteNodeInfoColumn("group"), func(plan nodeInfoUpdatePlan) any { return plan.Group })
 	if hasSyncedNodeInfoName(plans) {
 		if !first {
 			sb.WriteString(", ")
@@ -2182,6 +2190,13 @@ func tryBatchUpdateNodeInfoWithCaseWhen(plans []nodeInfoUpdatePlan) (int, error)
 		return 0, fmt.Errorf("节点信息批量更新影响行数不匹配: got %d, want %d", result.RowsAffected, len(plans))
 	}
 	return int(result.RowsAffected), nil
+}
+
+func quoteNodeInfoColumn(column string) string {
+	if database.Dialect == database.DialectMySQL {
+		return "`" + strings.ReplaceAll(column, "`", "``") + "`"
+	}
+	return `"` + strings.ReplaceAll(column, `"`, `""`) + `"`
 }
 
 func hasSyncedNodeInfoName(plans []nodeInfoUpdatePlan) bool {
@@ -2220,6 +2235,8 @@ func updateNodeInfoCache(plan nodeInfoUpdatePlan) {
 		cachedNode.ClashExtra = plan.ClashExtra
 		cachedNode.LinkHash = plan.LinkHash
 		cachedNode.SourceSort = plan.SourceSort
+		cachedNode.Source = plan.Source
+		cachedNode.Group = plan.Group
 		cachedNode.UpdatedAt = plan.UpdatedAt
 		cachedNode.NameMode = NormalizeNodeNameMode(cachedNode.NameMode)
 		cachedNode.EffectiveNameValue = cachedNode.EffectiveName()
@@ -2237,6 +2254,8 @@ func fallbackToIndividualNodeInfoUpdate(updates []NodeInfoUpdate) int {
 			"clash_extra": plan.ClashExtra,
 			"link_hash":   plan.LinkHash,
 			"source_sort": plan.SourceSort,
+			"source":      plan.Source,
+			"group":       plan.Group,
 			"updated_at":  plan.UpdatedAt,
 		}
 		if plan.SyncName {

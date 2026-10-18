@@ -179,12 +179,17 @@ func AirportAdd(c *gin.Context) {
 		return
 	}
 
+	group := strings.TrimSpace(req.Group)
+	if group == "" {
+		group = strings.TrimSpace(req.Name)
+	}
+
 	airport := models.Airport{
 		Name:                         req.Name,
 		URL:                          req.URL,
 		CronExpr:                     req.CronExpr,
 		Enabled:                      req.Enabled,
-		Group:                        req.Group,
+		Group:                        group,
 		DownloadWithProxy:            req.DownloadWithProxy,
 		ProxyLink:                    req.ProxyLink,
 		UserAgent:                    req.UserAgent,
@@ -280,11 +285,15 @@ func AirportUpdate(c *gin.Context) {
 	}
 
 	// 更新机场
+	group := strings.TrimSpace(req.Group)
+	if group == "" {
+		group = strings.TrimSpace(req.Name)
+	}
 	existing.Name = req.Name
 	existing.URL = req.URL
 	existing.CronExpr = req.CronExpr
 	existing.Enabled = req.Enabled
-	existing.Group = req.Group
+	existing.Group = group
 	existing.DownloadWithProxy = req.DownloadWithProxy
 	existing.ProxyLink = req.ProxyLink
 	existing.UserAgent = req.UserAgent

@@ -58,14 +58,16 @@ type GroupDetailResponse struct {
 
 // GetGroupDetail 获取分组详情（聚合分组内的机场列表及排序）
 func GetGroupDetail(groupName string) (*GroupDetailResponse, error) {
-	// 从节点缓存按 group 索引获取该分组下所有节点
+	// 从节点缓存按 group 索引获取该分组下所有节点。
 	groupNodes := nodeCache.GetByIndex("group", groupName)
-	if len(groupNodes) == 0 {
-		return &GroupDetailResponse{
-			GroupName: groupName,
-			Airports:  []GroupAirportDetail{},
-		}, nil
-	}
+
+	// 机场保存分组后，即使还没有成功拉取节点，也应出现在分组排序中。
+	// 先按机场 ID 排序，作为无节点机场的稳定兜底顺序。
+	groupAirports := airportCache.FilterSorted(func(airport Airport) bool {
+		return airport.Group == groupName
+	}, func(a, b Airport) bool {
+		return a.ID < b.ID
+	})
 
 	// 按节点 ID 升序排列，保证"首次出现顺序"与订阅输出一致
 	sort.Slice(groupNodes, func(i, j int) bool {
@@ -81,6 +83,15 @@ func GetGroupDetail(groupName string) (*GroupDetailResponse, error) {
 		if _, ok := firstRankBySource[node.SourceID]; !ok {
 			firstRankBySource[node.SourceID] = nextRank
 			nextRank++
+		}
+	}
+	for _, airport := range groupAirports {
+		if _, ok := firstRankBySource[airport.ID]; !ok {
+			firstRankBySource[airport.ID] = nextRank
+			nextRank++
+		}
+		if _, ok := airportNodeCount[airport.ID]; !ok {
+			airportNodeCount[airport.ID] = 0
 		}
 	}
 
@@ -217,13 +228,21 @@ func GetGroupAirportSortMap(groupName string) map[int]int {
 
 // GetAllGroupNames 获取所有分组名称（从节点缓存获取）
 func GetAllGroupNames() []string {
-	groups := nodeCache.GetDistinctIndexValues("group")
-	// 过滤空分组
-	result := make([]string, 0, len(groups))
-	for _, g := range groups {
-		if g != "" {
-			result = append(result, g)
+	groupSet := make(map[string]struct{})
+	for _, groupName := range nodeCache.GetDistinctIndexValues("group") {
+		if groupName != "" {
+			groupSet[groupName] = struct{}{}
 		}
+	}
+	for _, airport := range airportCache.GetAll() {
+		if airport.Group != "" {
+			groupSet[airport.Group] = struct{}{}
+		}
+	}
+
+	result := make([]string, 0, len(groupSet))
+	for groupName := range groupSet {
+		result = append(result, groupName)
 	}
 	sort.Strings(result)
 	return result
@@ -250,6 +269,11 @@ func GetAllGroupInfos() []GroupInfo {
 	for _, name := range groupNames {
 		groupNodes := nodeCache.GetByIndex("group", name)
 		airportSet := make(map[int]bool)
+		for _, airport := range airportCache.GetAll() {
+			if airport.Group == name {
+				airportSet[airport.ID] = true
+			}
+		}
 		for _, node := range groupNodes {
 			airportSet[node.SourceID] = true
 		}

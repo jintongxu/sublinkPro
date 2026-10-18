@@ -73,6 +73,28 @@ func decodeAirportAPIResponse(t *testing.T, recorder *httptest.ResponseRecorder)
 	return decodeAPIResponse(t, recorder)
 }
 
+func TestAirportAddDefaultsGroupToAirportName(t *testing.T) {
+	setupAirportAPITestDB(t)
+
+	addRecorder := performAirportJSONRequest(t, AirportAdd, http.MethodPost, "/api/v1/airports", map[string]any{
+		"name":     "宝可梦机场",
+		"url":      "https://example.com/pokemon",
+		"cronExpr": "0 */12 * * *",
+		"enabled":  false,
+	})
+	if addRecorder.Code != http.StatusOK {
+		t.Fatalf("add airport status = %d, body = %s", addRecorder.Code, addRecorder.Body.String())
+	}
+
+	var stored models.Airport
+	if err := database.DB.Where("name = ?", "宝可梦机场").First(&stored).Error; err != nil {
+		t.Fatalf("load added airport: %v", err)
+	}
+	if stored.Group != "宝可梦机场" {
+		t.Fatalf("group = %q, want airport name", stored.Group)
+	}
+}
+
 func TestAirportAddPersistsUpdateAfterDetectSettings(t *testing.T) {
 	setupAirportAPITestDB(t)
 

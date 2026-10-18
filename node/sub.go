@@ -984,9 +984,11 @@ func scheduleClashToNodeLinks(ctx context.Context, id int, proxys []protocol.Pro
 					if existingByName, nameExists := existingInfoNodeNames[contentHash][proxy.Name]; nameExists {
 						backfilledCountry := backfillExistingNodeCountry(existingByName, proxy.Name)
 						// 该名称的信息节点已存在，检查链接或顺序是否变化
-						if existingByName.LinkName != proxy.Name || existingByName.Link != link || existingByName.ClashExtra != Node.ClashExtra || existingByName.SourceSort != Node.SourceSort {
+						if existingByName.LinkName != proxy.Name || existingByName.Link != link || existingByName.ClashExtra != Node.ClashExtra || existingByName.SourceSort != Node.SourceSort || existingByName.Source != Node.Source || existingByName.Group != Node.Group {
 							update := models.BuildNodeInfoUpdate(existingByName, proxy.Name, link, Node.SourceSort)
 							update.ClashExtra = Node.ClashExtra
+							update.Source = Node.Source
+							update.Group = Node.Group
 							nodesToUpdate = append(nodesToUpdate, update)
 							updateCount++
 							nodeStatus = "updated"
@@ -1009,9 +1011,11 @@ func scheduleClashToNodeLinks(ctx context.Context, id int, proxys []protocol.Pro
 					existingNode := existingNodeByContentHash[contentHash]
 					backfilledCountry := backfillExistingNodeCountry(existingNode, proxy.Name)
 
-					if existingNode.LinkName != proxy.Name || existingNode.Link != link || existingNode.ClashExtra != Node.ClashExtra || existingNode.SourceSort != Node.SourceSort {
+					if existingNode.LinkName != proxy.Name || existingNode.Link != link || existingNode.ClashExtra != Node.ClashExtra || existingNode.SourceSort != Node.SourceSort || existingNode.Source != Node.Source || existingNode.Group != Node.Group {
 						update := models.BuildNodeInfoUpdate(existingNode, proxy.Name, link, Node.SourceSort)
 						update.ClashExtra = Node.ClashExtra
+						update.Source = Node.Source
+						update.Group = Node.Group
 						nodesToUpdate = append(nodesToUpdate, update)
 						updateCount++
 						nodeStatus = "updated"

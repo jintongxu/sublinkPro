@@ -2,6 +2,39 @@ package models
 
 import "testing"
 
+func TestAirportGroupAppearsBeforeNodesArePulled(t *testing.T) {
+	oldAirports := airportCache.GetAll()
+	oldNodes := nodeCache.GetAll()
+	oldSorts := groupAirportSortCache.GetAll()
+	t.Cleanup(func() {
+		airportCache.LoadAll(oldAirports)
+		nodeCache.LoadAll(oldNodes)
+		groupAirportSortCache.LoadAll(oldSorts)
+	})
+
+	airportCache.LoadAll([]Airport{{ID: 7, Name: "机场A", Group: "香港"}})
+	nodeCache.LoadAll(nil)
+	groupAirportSortCache.LoadAll(nil)
+
+	groups := GetAllGroupNames()
+	if len(groups) != 1 || groups[0] != "香港" {
+		t.Fatalf("groups = %#v, want [香港]", groups)
+	}
+
+	infos := GetAllGroupInfos()
+	if len(infos) != 1 || infos[0].GroupName != "香港" || infos[0].NodeCount != 0 || infos[0].AirportCount != 1 {
+		t.Fatalf("group infos = %#v, want one airport-only group", infos)
+	}
+
+	detail, err := GetGroupDetail("香港")
+	if err != nil {
+		t.Fatalf("GetGroupDetail() error = %v", err)
+	}
+	if len(detail.Airports) != 1 || detail.Airports[0].AirportID != 7 || detail.Airports[0].AirportName != "机场A" || detail.Airports[0].NodeCount != 0 {
+		t.Fatalf("group detail = %#v, want airport-only detail", detail)
+	}
+}
+
 func TestSortNodesByAirport_DefaultOrder(t *testing.T) {
 	nodes := []Node{
 		{ID: 1, SourceID: 2, Name: "A-3", SourceSort: 3},
