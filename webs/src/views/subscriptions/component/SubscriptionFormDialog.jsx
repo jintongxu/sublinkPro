@@ -73,6 +73,22 @@ import {
 
 const normalizeCountryCode = (value) => (typeof value === 'string' ? value.trim().toUpperCase() : '');
 
+const assignNewNodesToAllGroups = (assignments, existingNodeIds, nodeIds, groupNames) => {
+  const next = { ...(assignments || {}) };
+  const existingIds = new Set((existingNodeIds || []).map(Number));
+  const groups = Array.from(new Set((groupNames || []).map((name) => String(name).trim()).filter(Boolean)));
+
+  (nodeIds || []).forEach((nodeId) => {
+    const normalizedID = Number(nodeId);
+    if (!Number.isInteger(normalizedID) || normalizedID <= 0 || existingIds.has(normalizedID)) return;
+    const key = String(normalizedID);
+    const current = Array.isArray(next[key]) ? next[key] : next[key] ? [next[key]] : [];
+    if (current.length === 0 && groups.length > 0) next[key] = groups;
+  });
+
+  return next;
+};
+
 const normalizeCountryCodeList = (values) => {
   if (!Array.isArray(values)) return [];
   return Array.from(new Set(values.map((value) => normalizeCountryCode(value)).filter(Boolean)));
@@ -339,7 +355,11 @@ export default function SubscriptionFormDialog({
 
   const assignedNodeIdsForGroup = (groupName) =>
     assignmentCandidateNodes
-      .filter((node) => (formData.nodeTemplateAssignments?.[String(node.ID)] || []).includes(groupName))
+      .filter((node) => {
+        const rawGroups = formData.nodeTemplateAssignments?.[String(node.ID)];
+        const groups = Array.isArray(rawGroups) ? rawGroups : rawGroups ? [rawGroups] : [];
+        return groups.includes(groupName);
+      })
       .map((node) => Number(node.ID));
 
   const closeAssignmentMenu = () => {
