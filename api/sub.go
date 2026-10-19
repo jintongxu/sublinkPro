@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -69,6 +70,61 @@ func parseSubscriptionUpdateInterval(raw string) int {
 		return maxSubscriptionUpdateIntervalHours
 	}
 	return int(interval)
+}
+
+func parseNodeTemplateAssignments(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+	var input map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &input); err != nil {
+		return "", fmt.Errorf("节点模板分配格式有误")
+	}
+	assignments := make(map[string][]string)
+	for rawID, encodedGroups := range input {
+		id, err := strconv.Atoi(strings.TrimSpace(rawID))
+		if err != nil || id <= 0 {
+			continue
+		}
+		var groups []string
+		if err := json.Unmarshal(encodedGroups, &groups); err != nil {
+			var group string
+			if json.Unmarshal(encodedGroups, &group) == nil {
+				groups = []string{group}
+			}
+		}
+		seen := make(map[string]struct{}, len(groups))
+		for _, group := range groups {
+			group = strings.TrimSpace(group)
+			if group == "" {
+				continue
+			}
+			if _, exists := seen[group]; !exists {
+				assignments[strconv.Itoa(id)] = append(assignments[strconv.Itoa(id)], group)
+				seen[group] = struct{}{}
+			}
+		}
+	}
+	if len(assignments) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(assignments)
+	if err != nil {
+		return "", fmt.Errorf("节点模板分配保存失败")
+	}
+	return string(encoded), nil
+}
+
+func buildExplicitNodeIDsJSON(raw string) string {
+	ids, err := parseCommaSeparatedIntIDs(raw)
+	if err != nil || len(ids) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 func parseCommaSeparatedIntIDs(raw string) ([]int, error) {
@@ -248,8 +304,16 @@ func SubAdd(c *gin.Context) {
 		}
 	}
 
+	nodeTemplateAssignments, err := parseNodeTemplateAssignments(c.PostForm("nodeTemplateAssignments"))
+	if err != nil {
+		utils.FailWithMsg(c, err.Error())
+		return
+	}
+
 	sub.Config = config
 	sub.Name = name
+	sub.NodeTemplateAssignments = nodeTemplateAssignments
+	sub.ExplicitNodeIDs = buildExplicitNodeIDsJSON(c.PostForm("explicitNodeIds"))
 	sub.IPWhitelist = ipWhitelist
 	sub.IPBlacklist = ipBlacklist
 	sub.DelayTime = delayTime
@@ -280,7 +344,7 @@ func SubAdd(c *gin.Context) {
 	sub.UnlockRuleMode = unlockRuleMode
 	sub.CreateDate = time.Now().Format("2006-01-02 15:04:05")
 
-	err := sub.Add()
+	err = sub.Add()
 	if err != nil {
 		utils.FailWithMsg(c, "添加失败")
 		return
@@ -460,6 +524,17 @@ func SubUpdate(c *gin.Context) {
 				sub.Nodes = append(sub.Nodes, node)
 			}
 		}
+	}
+	if rawAssignments, hasAssignments := c.GetPostForm("nodeTemplateAssignments"); hasAssignments {
+		nodeTemplateAssignments, parseErr := parseNodeTemplateAssignments(rawAssignments)
+		if parseErr != nil {
+			utils.FailWithMsg(c, parseErr.Error())
+			return
+		}
+		sub.NodeTemplateAssignments = nodeTemplateAssignments
+	}
+	if rawExplicitNodeIDs, hasExplicitNodeIDs := c.GetPostForm("explicitNodeIds"); hasExplicitNodeIDs {
+		sub.ExplicitNodeIDs = buildExplicitNodeIDsJSON(rawExplicitNodeIDs)
 	}
 	sub.IPWhitelist = ipWhitelist
 	sub.IPBlacklist = ipBlacklist

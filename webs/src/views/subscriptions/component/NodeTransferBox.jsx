@@ -41,6 +41,7 @@ export default function NodeTransferBox({
   selectorNodesLoading,
   selectedNodes,
   selectedNodesList,
+  chainTargetNodeGroups = new Map(),
   checkedAvailable,
   checkedSelected,
   selectedNodeSearch,
@@ -774,7 +775,19 @@ export default function NodeTransferBox({
                   <Tooltip title={node.Name} placement="top" arrow>
                     <ListItemText
                       primary={node.Name}
-                      secondary={node.Group}
+                      secondary={
+                        <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
+                          {node.Group}
+                          {chainTargetNodeGroups.has(Number(node.ID)) && (
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              color="info"
+                              label={`链式落地 · 前置组：${Array.from(chainTargetNodeGroups.get(Number(node.ID))).join('、')}`}
+                            />
+                          )}
+                        </Stack>
+                      }
                       primaryTypographyProps={{
                         noWrap: true,
                         fontSize: '0.875rem',

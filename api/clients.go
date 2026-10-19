@@ -639,6 +639,42 @@ func renderPreparedClash(c *gin.Context, prepared preparedClientResponse) {
 	_, _ = c.Writer.WriteString(string(bridge.Body))
 }
 
+func readNodeTemplateAssignments(sub models.Subcription) map[int][]string {
+	result := make(map[int][]string)
+	if strings.TrimSpace(sub.NodeTemplateAssignments) == "" {
+		return result
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(sub.NodeTemplateAssignments), &raw); err != nil {
+		return result
+	}
+	for key, encodedGroups := range raw {
+		id, err := strconv.Atoi(key)
+		if err != nil || id <= 0 {
+			continue
+		}
+		var groups []string
+		if err := json.Unmarshal(encodedGroups, &groups); err != nil {
+			var group string
+			if json.Unmarshal(encodedGroups, &group) == nil {
+				groups = []string{group}
+			}
+		}
+		seen := make(map[string]struct{}, len(groups))
+		for _, group := range groups {
+			group = strings.TrimSpace(group)
+			if group == "" {
+				continue
+			}
+			if _, exists := seen[group]; !exists {
+				result[id] = append(result[id], group)
+				seen[group] = struct{}{}
+			}
+		}
+	}
+	return result
+}
+
 func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (mihomoBridgeOutput, bool, bool) {
 	clashPrepared := prepared
 	clashPrepared.ClientType = "clash"
@@ -648,6 +684,7 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 	}
 	sub := resolved.Subscription
 	var urls []protocol.Urls
+	nodeTemplateAssignments := readNodeTemplateAssignments(sub)
 
 	// 获取链式代理规则
 	chainRules := models.GetEnabledChainRulesBySubscriptionID(sub.ID)
@@ -735,6 +772,7 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 				urls = append(urls, protocol.Urls{
 					Url:             renamedLink,
 					DialerProxyName: dialerProxy,
+					ProxyGroups:     nodeTemplateAssignments[v.ID],
 				})
 			}
 			continue
@@ -753,6 +791,7 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 				urls = append(urls, protocol.Urls{
 					Url:             link,
 					DialerProxyName: dialerProxy,
+					ProxyGroups:     nodeTemplateAssignments[v.ID],
 				})
 			}
 		// 默认
@@ -765,6 +804,7 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 				Url:             nodeLink,
 				DialerProxyName: dialerProxy,
 				ClashExtra:      clashExtra,
+				ProxyGroups:     nodeTemplateAssignments[v.ID],
 			})
 		}
 	}
@@ -775,6 +815,9 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 		_, _ = c.Writer.WriteString("配置读取错误")
 		return mihomoBridgeOutput{}, false, false
 	}
+	// Persisted assignments from older subscriptions imply that the optional
+	// assignment mode was enabled before the explicit config flag existed.
+	configs.NodeTemplateAssignmentsEnabled = configs.NodeTemplateAssignmentsEnabled || len(nodeTemplateAssignments) > 0
 	configs.ExcludedProxyNames = make([]string, 0, len(excludedProxyNames))
 	for name := range excludedProxyNames {
 		configs.ExcludedProxyNames = append(configs.ExcludedProxyNames, name)

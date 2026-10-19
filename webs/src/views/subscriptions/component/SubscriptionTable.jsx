@@ -64,6 +64,23 @@ export default function SubscriptionTable({
   const theme = useTheme();
   const { t } = useTranslation();
 
+  const parseConfig = (value, fallback = '') => {
+    try {
+      return typeof value === 'string' ? JSON.parse(value) : value;
+    } catch {
+      return fallback;
+    }
+  };
+  const formatChainRule = (rule, sub) => {
+    const chain = parseConfig(rule.chainConfig, []);
+    const target = parseConfig(rule.targetConfig, {});
+    const nodeNames = new Map((sub.Nodes || []).map((node) => [Number(node.ID), getNodeDisplayName(node)]));
+    const formatItem = (item) => item.groupName || item.name || (item.nodeId ? nodeNames.get(Number(item.nodeId)) || `节点 #${item.nodeId}` : item.type || '来源');
+    const source = Array.isArray(chain) && chain.length > 0 ? chain.map(formatItem).join(' → ') : rule.name || '链式规则';
+    const targetText = target.groupName || target.name || (target.nodeId ? nodeNames.get(Number(target.nodeId)) || `节点 #${target.nodeId}` : target.type || '目标');
+    return `${source} → ${targetText}`;
+  };
+
   return (
     <TableContainer component={Paper}>
       <Table>
@@ -177,15 +194,23 @@ export default function SubscriptionTable({
                           onBatchMove={onBatchMove}
                         />
                       ) : (
-                        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                        <Stack spacing={1}>
+                          {sub.ChainRules?.filter((rule) => rule.enabled !== false).map((rule) => (
+                            <Stack key={`chain-${rule.id}`} direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
+                              <AccountTreeIcon fontSize="small" color="warning" />
+                              <Typography variant="caption" color="warning.main">链式引用：</Typography>
+                              <Chip label={formatChainRule(rule, sub)} size="small" color="warning" variant="outlined" />
+                            </Stack>
+                          ))}
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                           {getSortedItems(sub).map((item, idx) =>
                             item._type === 'node' ? (
                               <Chip
                                 key={item._type + item.ID}
-                                label={getNodeDisplayName(item)}
+                                label={item.DialerProxyName ? `经前置：${getNodeDisplayName(item)} → ${item.DialerProxyName}` : getNodeDisplayName(item)}
                                 size="small"
                                 variant="outlined"
-                                color="success"
+                                color={item.DialerProxyName ? 'warning' : 'success'}
                                 onClick={() => onCopyToClipboard(item.Link)}
                               />
                             ) : item._type === 'airport' ? (
@@ -206,6 +231,7 @@ export default function SubscriptionTable({
                               />
                             )
                           )}
+                          </Stack>
                         </Stack>
                       )}
                     </Box>

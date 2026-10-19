@@ -270,8 +270,8 @@ func (m *Manager) stop(disableAutostart bool) error {
 	}
 
 	select {
-	case <-done:
-		return nil
+	case err := <-done:
+		return err
 	case <-time.After(5 * time.Second):
 		if cancel != nil {
 			cancel()
@@ -279,7 +279,9 @@ func (m *Manager) stop(disableAutostart bool) error {
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-		<-done
+		if err := <-done; err != nil {
+			return err
+		}
 		return nil
 	}
 }

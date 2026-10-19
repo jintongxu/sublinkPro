@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sublink/cache"
@@ -248,6 +249,9 @@ type Urls struct {
 	Url             string
 	DialerProxyName string
 	ClashExtra      string
+	// ProxyGroups optionally assigns this node to one or more template proxy groups.
+	// Empty preserves the historical automatic group behavior.
+	ProxyGroups []string
 }
 
 // 删除opts中的空值
@@ -300,6 +304,15 @@ func isTruthyConfigValue(value any) bool {
 }
 
 // shouldPreserveProxyGroup 判断代理组是否应保留模板原始语义，而不是在服务端展开成固定节点列表。
+func proxyAssignedToGroup(assignments map[string][]string, proxyName, groupName string) bool {
+	for _, assignedGroup := range assignments[proxyName] {
+		if strings.TrimSpace(assignedGroup) == strings.TrimSpace(groupName) {
+			return true
+		}
+	}
+	return false
+}
+
 func shouldPreserveProxyGroup(proxyGroup map[string]any) bool {
 	for _, field := range []string{"include-all", "include-all-proxies", "include-all-providers"} {
 		if isTruthyConfigValue(proxyGroup[field]) {
@@ -403,7 +416,39 @@ func EncodeClash(urls []Urls, config OutputConfig) ([]byte, error) {
 	}
 
 	// 生成Clash配置文件
-	return decodeClashWithOptions(proxys, config.Clash, [][]CustomProxyGroup{config.CustomProxyGroups}, config.ExcludedProxyNames)
+	assignments := make(map[string][]string)
+	seenAssignments := make(map[string][]string)
+	for _, link := range urls {
+		// LinkToProxy uses the final protocol name; derive it again so assignment
+		// remains independent of the caller's URL ordering.
+		if proxy, err := LinkToProxy(link, config); err == nil {
+			groups := make([]string, 0, len(link.ProxyGroups))
+			seen := make(map[string]struct{}, len(link.ProxyGroups))
+			for _, group := range link.ProxyGroups {
+				group = strings.TrimSpace(group)
+				if group == "" {
+					continue
+				}
+				if _, exists := seen[group]; exists {
+					continue
+				}
+				groups = append(groups, group)
+				seen[group] = struct{}{}
+			}
+			sort.Strings(groups)
+			if existingGroups, exists := seenAssignments[proxy.Name]; exists {
+				if strings.Join(existingGroups, "\x00") != strings.Join(groups, "\x00") {
+					return nil, fmt.Errorf("节点名称 %q 重复且代理组分配不同，请使用命名规则生成唯一名称", proxy.Name)
+				}
+			} else {
+				seenAssignments[proxy.Name] = groups
+			}
+			if len(groups) > 0 {
+				assignments[proxy.Name] = groups
+			}
+		}
+	}
+	return decodeClashWithOptions(proxys, config.Clash, [][]CustomProxyGroup{config.CustomProxyGroups}, config.ExcludedProxyNames, assignments, config.NodeTemplateAssignmentsEnabled)
 }
 
 // DecodeClash 用于解析 Clash 配置文件并合并新节点
@@ -411,10 +456,10 @@ func EncodeClash(urls []Urls, config OutputConfig) ([]byte, error) {
 // yamlfile: 模板文件路径或 URL
 // customGroups: 自定义代理组列表（可选，由链式代理规则生成）
 func DecodeClash(proxys []Proxy, yamlfile string, customGroups ...[]CustomProxyGroup) ([]byte, error) {
-	return decodeClashWithOptions(proxys, yamlfile, customGroups, nil)
+	return decodeClashWithOptions(proxys, yamlfile, customGroups, nil, nil, false)
 }
 
-func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]CustomProxyGroup, excludedNames []string) ([]byte, error) {
+func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]CustomProxyGroup, excludedNames []string, assignments map[string][]string, strictAssignments bool) ([]byte, error) {
 	// 读取 YAML 文件
 	var data []byte
 	var err error
@@ -466,11 +511,13 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 	}
 	// 定义一个代理列表名字。前置节点保留在 proxies 中，但不加入自动生成的代理组。
 	ProxiesNameList := []string{}
+	proxyNameSet := make(map[string]struct{})
 	excludedProxyNames := make(map[string]bool, len(excludedNames))
 	for _, name := range excludedNames {
 		excludedProxyNames[strings.TrimSpace(name)] = true
 	}
 	for _, p := range proxys {
+		proxyNameSet[p.Name] = struct{}{}
 		if !excludedProxyNames[p.Name] {
 			ProxiesNameList = append(ProxiesNameList, p.Name)
 		}
@@ -482,6 +529,36 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 	proxyGroups, ok := config["proxy-groups"].([]any)
 	if !ok {
 		proxyGroups = []any{}
+	}
+	// Ignore unknown group names when building membership. In strict mode, a node
+	// whose assignments are all unknown therefore remains out of ordinary groups.
+	validGroupNames := make(map[string]struct{}, len(proxyGroups))
+	for _, pg := range proxyGroups {
+		if group, ok := pg.(map[string]any); ok {
+			if name, ok := group["name"].(string); ok {
+				validGroupNames[strings.TrimSpace(name)] = struct{}{}
+			}
+		}
+	}
+	if len(customGroups) > 0 {
+		for _, customGroup := range customGroups[0] {
+			if name := strings.TrimSpace(customGroup.Name); name != "" {
+				validGroupNames[name] = struct{}{}
+			}
+		}
+	}
+	for proxyName, groupNames := range assignments {
+		validGroups := make([]string, 0, len(groupNames))
+		for _, groupName := range groupNames {
+			if _, ok := validGroupNames[strings.TrimSpace(groupName)]; ok {
+				validGroups = append(validGroups, strings.TrimSpace(groupName))
+			}
+		}
+		if len(validGroups) == 0 {
+			delete(assignments, proxyName)
+		} else {
+			assignments[proxyName] = validGroups
+		}
 	}
 
 	// 插入自定义代理组（在模板组之后）
@@ -550,8 +627,16 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 			continue
 		}
 
+		// 自定义代理组（由链式代理规则生成）拥有链路解析后的权威成员列表。
+		// 不要对它执行普通模板组的前置节点排除，否则链式组会丢失必要成员。
+		if isCustom, ok := proxyGroup["_custom_group"].(bool); ok && isCustom {
+			delete(proxyGroup, "_custom_group")
+			proxyGroups[i] = proxyGroup
+			continue
+		}
+
 		// 前置节点可以保留在 proxies 定义中供 dialer-proxy 引用，
-		// 但不应出现在任何显式节点代理组中。
+		// 但不应出现在普通显式节点代理组中。
 		if existingProxies, ok := proxyGroup["proxies"].([]any); ok && len(excludedProxyNames) > 0 {
 			filteredProxies := make([]any, 0, len(existingProxies))
 			for _, proxy := range existingProxies {
@@ -563,22 +648,54 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 			proxyGroup["proxies"] = filteredProxies
 		}
 
-		// 自定义代理组（由链式代理规则生成）已有自己的节点列表，跳过节点追加
-		if isCustom, ok := proxyGroup["_custom_group"].(bool); ok && isCustom {
-			// 删除内部标记，避免输出到配置文件
-			delete(proxyGroup, "_custom_group")
-			proxyGroups[i] = proxyGroup
-			continue
+		// Explicit assignments are authoritative in strict mode. Mihomo appends
+		// include-all results to proxies and applies exclude-filter to both, so
+		// materialize membership rather than mixing explicit and dynamic sources.
+		if strictAssignments {
+			for _, field := range []string{"include-all", "include-all-proxies", "include-all-providers", "use", "filter", "exclude-filter", "exclude-type"} {
+				delete(proxyGroup, field)
+			}
 		}
 
-		// include-all、use/filter 等自动匹配组应保持模板原意，不能强行展开为固定节点列表。
-		if shouldPreserveProxyGroup(proxyGroup) {
-			if len(excludedProxyNames) > 0 {
-				patternParts := make([]string, 0, len(excludedProxyNames))
-				for name := range excludedProxyNames {
-					patternParts = append(patternParts, regexp.QuoteMeta(strings.TrimSpace(name)))
+		// Disabled assignment mode preserves the template's dynamic semantics.
+		if !strictAssignments && shouldPreserveProxyGroup(proxyGroup) {
+			groupName, _ := proxyGroup["name"].(string)
+			existing, _ := proxyGroup["proxies"].([]any)
+			filteredExisting := make([]any, 0, len(existing)+len(ProxiesNameList))
+			seen := make(map[string]struct{}, len(existing)+len(ProxiesNameList))
+			for _, item := range existing {
+				if name, ok := item.(string); ok {
+					if _, assigned := assignments[name]; assigned && !proxyAssignedToGroup(assignments, name, groupName) {
+						continue
+					}
+					if _, exists := seen[name]; exists {
+						continue
+					}
+					seen[name] = struct{}{}
 				}
-				excludedPattern := "(?:" + strings.Join(patternParts, "|") + ")"
+				filteredExisting = append(filteredExisting, item)
+			}
+			for _, name := range ProxiesNameList {
+				if proxyAssignedToGroup(assignments, name, groupName) {
+					if _, exists := seen[name]; !exists {
+						filteredExisting = append(filteredExisting, name)
+						seen[name] = struct{}{}
+					}
+				}
+			}
+			if len(filteredExisting) > 0 {
+				proxyGroup["proxies"] = filteredExisting
+			}
+
+			patternNames := make([]string, 0, len(excludedProxyNames)+len(assignments))
+			for name := range excludedProxyNames {
+				patternNames = append(patternNames, regexp.QuoteMeta(strings.TrimSpace(name)))
+			}
+			for name := range assignments {
+				patternNames = append(patternNames, regexp.QuoteMeta(strings.TrimSpace(name)))
+			}
+			if len(patternNames) > 0 {
+				excludedPattern := "^(?:" + strings.Join(patternNames, "|") + ")$"
 				if existingFilter, ok := proxyGroup["exclude-filter"].(string); ok && strings.TrimSpace(existingFilter) != "" {
 					proxyGroup["exclude-filter"] = "(?:" + existingFilter + ")|" + excludedPattern
 				} else {
@@ -589,10 +706,62 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 			continue
 		}
 
+		// In strict mode, only explicitly assigned nodes are emitted in ordinary groups;
+		// otherwise assigned nodes are filtered while unassigned nodes retain legacy behavior.
+		groupNodeNames := ProxiesNameList
+		if groupName, ok := proxyGroup["name"].(string); ok && (len(assignments) > 0 || strictAssignments) {
+			groupNodeNames = make([]string, 0, len(ProxiesNameList))
+			for _, name := range ProxiesNameList {
+				if strictAssignments {
+					if !proxyAssignedToGroup(assignments, name, groupName) {
+						continue
+					}
+				} else if _, exists := assignments[name]; exists && !proxyAssignedToGroup(assignments, name, groupName) {
+					continue
+				}
+				groupNodeNames = append(groupNodeNames, name)
+			}
+		}
+
 		// 获取现有的 proxies 列表
 		var existingProxies []any
 		if proxyGroup["proxies"] != nil {
 			existingProxies, _ = proxyGroup["proxies"].([]any)
+		}
+		// Explicit assignments override generated membership while preserving
+		// unrelated template entries. Add assigned nodes to their target group
+		// even when that group already has static entries.
+		if groupName, ok := proxyGroup["name"].(string); ok && (len(assignments) > 0 || strictAssignments) {
+			filtered := make([]any, 0, len(existingProxies)+len(ProxiesNameList))
+			seen := make(map[string]struct{}, len(existingProxies)+len(ProxiesNameList))
+			for _, item := range existingProxies {
+				name, isName := item.(string)
+				if isName {
+					if strictAssignments {
+						if _, isNode := proxyNameSet[name]; isNode && !proxyAssignedToGroup(assignments, name, groupName) {
+							continue
+						}
+					} else if _, exists := assignments[name]; exists && !proxyAssignedToGroup(assignments, name, groupName) {
+						continue
+					}
+					if _, exists := seen[name]; exists {
+						continue
+					}
+					seen[name] = struct{}{}
+				}
+				filtered = append(filtered, item)
+			}
+			existingProxies = filtered
+			for _, name := range ProxiesNameList {
+				if proxyAssignedToGroup(assignments, name, groupName) {
+					if _, exists := seen[name]; exists {
+						continue
+					}
+					seen[name] = struct{}{}
+					existingProxies = append(existingProxies, name)
+				}
+			}
+			proxyGroup["proxies"] = existingProxies
 		}
 
 		// 检查是否包含 __ALL_PROXIES__ 占位符（与 subconverter 行为一致）
@@ -608,19 +777,29 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 		}
 
 		if hasPlaceholder {
-			// 构建新的 proxies 列表：占位符之前的元素 + 非前置节点
+			// 构建新的 proxies 列表：占位符之前的元素 + 非前置节点，且不重复。
 			var newProxies []any
+			seen := make(map[string]struct{})
+			appendProxy := func(value any) {
+				if name, ok := value.(string); ok {
+					if _, exists := seen[name]; exists {
+						return
+					}
+					seen[name] = struct{}{}
+				}
+				newProxies = append(newProxies, value)
+			}
 			// 添加占位符之前的元素（组引用如 🔯 故障转移、♻️ 自动选择、DIRECT 等）
 			for j := 0; j < placeholderIndex; j++ {
-				newProxies = append(newProxies, existingProxies[j])
+				appendProxy(existingProxies[j])
 			}
 			// 添加所有节点
-			for _, newProxy := range ProxiesNameList {
-				newProxies = append(newProxies, newProxy)
+			for _, newProxy := range groupNodeNames {
+				appendProxy(newProxy)
 			}
 			// 添加占位符之后的元素（如果有的话）
 			for j := placeholderIndex + 1; j < len(existingProxies); j++ {
-				newProxies = append(newProxies, existingProxies[j])
+				appendProxy(existingProxies[j])
 			}
 			proxyGroup["proxies"] = newProxies
 			proxyGroups[i] = proxyGroup
@@ -632,7 +811,7 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 		if len(existingProxies) == 0 {
 			// 没有任何 proxies，追加非前置节点
 			var validProxies []any
-			for _, newProxy := range ProxiesNameList {
+			for _, newProxy := range groupNodeNames {
 				validProxies = append(validProxies, newProxy)
 			}
 			// 如果仍然为空，插入 DIRECT 作为后备

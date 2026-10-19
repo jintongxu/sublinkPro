@@ -3,6 +3,7 @@ package protocol
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -727,6 +728,334 @@ proxy-groups:
 	}
 	if secondGroup["filter"] != "(?i)(🇭🇰|香港|Hong Kong|\\bHK\\b)" {
 		t.Fatalf("filter 被意外改写: %#v", secondGroup["filter"])
+	}
+}
+
+func TestEncodeClashAppliesNodeProxyGroupAssignments(t *testing.T) {
+	templatePath := filepath.Join(t.TempDir(), "assigned-groups.yaml")
+	template := `proxies: []
+proxy-groups:
+  - name: Group A
+    type: select
+    proxies:
+      - __ALL_PROXIES__
+  - name: Group B
+    type: select
+    include-all-proxies: true
+    proxies:
+      - node-a
+`
+	if err := os.WriteFile(templatePath, []byte(template), 0o600); err != nil {
+		t.Fatalf("写入模板失败: %v", err)
+	}
+
+	nodeA := EncodeSSURL(Ss{Name: "node-a", Server: "a.example.com", Port: 443, Param: Param{Cipher: "aes-256-gcm", Password: "a"}})
+	nodeB := EncodeSSURL(Ss{Name: "node-b", Server: "b.example.com", Port: 443, Param: Param{Cipher: "aes-256-gcm", Password: "b"}})
+	data, err := EncodeClash([]Urls{
+		{Url: nodeA, ProxyGroups: []string{"Group A", "Group B"}},
+		{Url: nodeB, ProxyGroups: []string{"Group A"}},
+	}, OutputConfig{Clash: templatePath})
+	if err != nil {
+		t.Fatalf("EncodeClash 失败: %v", err)
+	}
+
+	var config map[string]any
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("解析输出 YAML 失败: %v", err)
+	}
+	groups, ok := config["proxy-groups"].([]any)
+	if !ok || len(groups) != 2 {
+		t.Fatalf("代理组解析失败: %#v", config["proxy-groups"])
+	}
+	groupNodes := make(map[string]map[string]bool)
+	for _, rawGroup := range groups {
+		group, ok := rawGroup.(map[string]any)
+		if !ok {
+			t.Fatalf("代理组类型错误: %#v", rawGroup)
+		}
+		name, _ := group["name"].(string)
+		members, _ := group["proxies"].([]any)
+		groupNodes[name] = make(map[string]bool)
+		for _, member := range members {
+			if memberName, ok := member.(string); ok {
+				groupNodes[name][memberName] = true
+			}
+		}
+	}
+	if !groupNodes["Group A"]["node-a"] || !groupNodes["Group A"]["node-b"] {
+		t.Fatalf("Group A 节点分配错误: %#v", groupNodes["Group A"])
+	}
+	if !groupNodes["Group B"]["node-a"] || groupNodes["Group B"]["node-b"] {
+		t.Fatalf("Group B 节点分配错误: %#v", groupNodes["Group B"])
+	}
+	groupB, _ := groups[1].(map[string]any)
+	if includeAll, ok := groupB["include-all-proxies"].(bool); !ok || !includeAll {
+		t.Fatalf("显式分配不应移除动态组语义: %#v", groupB)
+	}
+	excludeFilter, _ := groupB["exclude-filter"].(string)
+	excludePattern, err := regexp.Compile(excludeFilter)
+	if err != nil {
+		t.Fatalf("动态组 exclude-filter 无效: %q, %v", excludeFilter, err)
+	}
+	if !excludePattern.MatchString("node-a") || !excludePattern.MatchString("node-b") {
+		t.Fatalf("显式分配节点必须从动态发现中排除，避免重复: %q", excludeFilter)
+	}
+	if excludePattern.MatchString("node-a-extra") {
+		t.Fatalf("exclude-filter 应只匹配完整节点名: %q", excludeFilter)
+	}
+}
+
+func TestEncodeClashStrictAssignmentsExcludeUnassignedNodes(t *testing.T) {
+	templatePath := filepath.Join(t.TempDir(), "strict-assignment.yaml")
+	template := `proxies: []
+proxy-groups:
+  - name: Group A
+    type: select
+    proxies:
+      - __ALL_PROXIES__
+  - name: Group B
+    type: select
+    proxies:
+      - __ALL_PROXIES__
+`
+	if err := os.WriteFile(templatePath, []byte(template), 0o600); err != nil {
+		t.Fatalf("写入模板失败: %v", err)
+	}
+	nodeA := EncodeSSURL(Ss{Name: "node-a", Server: "a.example.com", Port: 443, Param: Param{Cipher: "aes-256-gcm", Password: "a"}})
+	nodeB := EncodeSSURL(Ss{Name: "node-b", Server: "b.example.com", Port: 443, Param: Param{Cipher: "aes-256-gcm", Password: "b"}})
+	data, err := EncodeClash([]Urls{
+		{Url: nodeA, ProxyGroups: []string{"Group A"}},
+		{Url: nodeB},
+	}, OutputConfig{Clash: templatePath, NodeTemplateAssignmentsEnabled: true})
+	if err != nil {
+		t.Fatalf("EncodeClash 失败: %v", err)
+	}
+	var config map[string]any
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("解析输出 YAML 失败: %v", err)
+	}
+	groups, _ := config["proxy-groups"].([]any)
+	for _, raw := range groups {
+		group, _ := raw.(map[string]any)
+		name, _ := group["name"].(string)
+		members, _ := group["proxies"].([]any)
+		containsA, containsB := false, false
+		for _, member := range members {
+			if value, ok := member.(string); ok {
+				containsA = containsA || value == "node-a"
+				containsB = containsB || value == "node-b"
+			}
+		}
+		if name == "Group A" && (!containsA || containsB) {
+			t.Fatalf("严格模式 Group A 成员错误: %#v", members)
+		}
+		if name == "Group B" && (containsA || containsB) {
+			t.Fatalf("严格模式 Group B 不应包含任何未分配节点: %#v", members)
+		}
+	}
+}
+
+func TestEncodeClashStrictAssignmentsPreserveTemplateGroupReferences(t *testing.T) {
+	templatePath := filepath.Join(t.TempDir(), "strict-group-reference.yaml")
+	template := `proxies: []
+proxy-groups:
+  - name: Node Select
+    type: select
+    proxies:
+      - __ALL_PROXIES__
+  - name: Auto Select
+    type: url-test
+    include-all-proxies: true
+    proxies: []
+  - name: YouTube
+    type: select
+    proxies:
+      - Node Select
+      - Auto Select
+`
+	if err := os.WriteFile(templatePath, []byte(template), 0o600); err != nil {
+		t.Fatalf("写入模板失败: %v", err)
+	}
+	node := EncodeSSURL(Ss{Name: "megabox", Server: "a.example.com", Port: 443, Param: Param{Cipher: "aes-256-gcm", Password: "a"}})
+	data, err := EncodeClash([]Urls{{Url: node, ProxyGroups: []string{"YouTube"}}}, OutputConfig{
+		Clash: templatePath, NodeTemplateAssignmentsEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("EncodeClash 失败: %v", err)
+	}
+	var config map[string]any
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("解析输出 YAML 失败: %v", err)
+	}
+	groups, _ := config["proxy-groups"].([]any)
+	for _, raw := range groups {
+		group, _ := raw.(map[string]any)
+		name, _ := group["name"].(string)
+		if name != "YouTube" {
+			continue
+		}
+		members, _ := group["proxies"].([]any)
+		for _, reference := range []string{"Node Select", "Auto Select"} {
+			found := false
+			for _, member := range members {
+				found = found || member == reference
+			}
+			if !found {
+				t.Fatalf("严格模式应保留模板代理组引用 %q: %#v", reference, members)
+			}
+		}
+		foundNode := false
+		for _, member := range members {
+			if value, ok := member.(string); ok && value == "megabox" {
+				foundNode = true
+			}
+		}
+		if !foundNode {
+			t.Fatalf("严格模式 YouTube 应保留明确分配的节点: %#v", members)
+		}
+	}
+}
+
+func TestEncodeClashStrictAssignmentsMaterializeDynamicGroupsWithoutDuplicates(t *testing.T) {
+	templatePath := filepath.Join(t.TempDir(), "strict-dynamic-assignment.yaml")
+	template := `proxies: []
+proxy-groups:
+  - name: Group A
+    type: select
+    include-all-proxies: true
+    proxies: []
+  - name: Group B
+    type: select
+    include-all: true
+    include-all-proxies: true
+    include-all-providers: true
+    use: [provider-a]
+    filter: node
+    exclude-filter: node-a
+    exclude-type: ss
+    proxies: [node-a, node-a]
+`
+	if err := os.WriteFile(templatePath, []byte(template), 0o600); err != nil {
+		t.Fatalf("写入模板失败: %v", err)
+	}
+	nodeA := EncodeSSURL(Ss{Name: "node-a", Server: "a.example.com", Port: 443, Param: Param{Cipher: "aes-256-gcm", Password: "a"}})
+	nodeB := EncodeSSURL(Ss{Name: "node-b", Server: "b.example.com", Port: 443, Param: Param{Cipher: "aes-256-gcm", Password: "b"}})
+	data, err := EncodeClash([]Urls{
+		{Url: nodeA, ProxyGroups: []string{"Group B"}},
+		{Url: nodeB},
+	}, OutputConfig{Clash: templatePath, NodeTemplateAssignmentsEnabled: true})
+	if err != nil {
+		t.Fatalf("EncodeClash 失败: %v", err)
+	}
+	var config map[string]any
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("解析输出 YAML 失败: %v", err)
+	}
+	groups, _ := config["proxy-groups"].([]any)
+	for _, raw := range groups {
+		group, _ := raw.(map[string]any)
+		name, _ := group["name"].(string)
+		for _, field := range []string{"include-all-proxies", "include-all", "include-all-providers", "use", "filter", "exclude-filter"} {
+			if _, exists := group[field]; exists {
+				t.Fatalf("严格分配不应混合动态收集字段 %q: %#v", field, group)
+			}
+		}
+		members, _ := group["proxies"].([]any)
+		count := 0
+		for _, member := range members {
+			if member == "node-b" {
+				t.Fatalf("未分配节点不应加入 %s: %#v", name, members)
+			}
+			if member == "node-a" {
+				count++
+			}
+		}
+		want := 0
+		if name == "Group B" {
+			want = 1
+		}
+		if count != want {
+			t.Fatalf("%s 节点次数=%d, want=%d: %#v", name, count, want, members)
+		}
+	}
+}
+
+func TestEncodeClashRejectsConflictingAssignmentsForDuplicateNames(t *testing.T) {
+	templatePath := filepath.Join(t.TempDir(), "duplicate-assignment.yaml")
+	if err := os.WriteFile(templatePath, []byte("proxies: []\nproxy-groups:\n  - name: A\n    type: select\n    proxies: []\n  - name: B\n    type: select\n    proxies: []\n"), 0o600); err != nil {
+		t.Fatalf("写入模板失败: %v", err)
+	}
+	first := EncodeSSURL(Ss{Name: "duplicate", Server: "a.example.com", Port: 443, Param: Param{Cipher: "aes-256-gcm", Password: "a"}})
+	second := EncodeSSURL(Ss{Name: "duplicate", Server: "b.example.com", Port: 443, Param: Param{Cipher: "aes-256-gcm", Password: "b"}})
+	_, err := EncodeClash([]Urls{{Url: first, ProxyGroups: []string{"A"}}, {Url: second, ProxyGroups: []string{"B"}}}, OutputConfig{Clash: templatePath})
+	if err == nil || !strings.Contains(err.Error(), "名称") {
+		t.Fatalf("重复名称冲突应返回明确错误: %v", err)
+	}
+	_, err = EncodeClash([]Urls{{Url: first, ProxyGroups: []string{"A"}}, {Url: second}}, OutputConfig{Clash: templatePath})
+	if err == nil || !strings.Contains(err.Error(), "名称") {
+		t.Fatalf("已分配与未分配的重复名称也应返回明确错误: %v", err)
+	}
+}
+
+func TestEncodeClashPreservesChainGroupsWithFrontProxyAssignments(t *testing.T) {
+	templatePath := filepath.Join(t.TempDir(), "chain-groups.yaml")
+	template := "proxies: []\nproxy-groups:\n  - name: Main\n    type: select\n    proxies: []\n"
+	if err := os.WriteFile(templatePath, []byte(template), 0o600); err != nil {
+		t.Fatalf("写入模板失败: %v", err)
+	}
+
+	front := EncodeSSURL(Ss{Name: "front", Server: "front.example.com", Port: 443, Param: Param{Cipher: "aes-256-gcm", Password: "front"}})
+	target := EncodeSSURL(Ss{Name: "target", Server: "target.example.com", Port: 443, Param: Param{Cipher: "aes-256-gcm", Password: "target"}})
+	data, err := EncodeClash([]Urls{
+		{Url: front},
+		{Url: target, DialerProxyName: "front", ProxyGroups: []string{"Main", "Chain"}},
+	}, OutputConfig{
+		Clash:              templatePath,
+		CustomProxyGroups:  []CustomProxyGroup{{Name: "Chain", Type: "select", Proxies: []string{"front", "target"}}},
+		ExcludedProxyNames: []string{"front"},
+	})
+	if err != nil {
+		t.Fatalf("EncodeClash 失败: %v", err)
+	}
+
+	var config map[string]any
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("解析输出 YAML 失败: %v", err)
+	}
+	proxies, _ := config["proxies"].([]any)
+	proxyNames := make(map[string]bool)
+	for _, rawProxy := range proxies {
+		if proxy, ok := rawProxy.(map[string]any); ok {
+			if name, ok := proxy["name"].(string); ok {
+				proxyNames[name] = true
+			}
+		}
+	}
+	if !proxyNames["front"] || !proxyNames["target"] {
+		t.Fatalf("前置节点或目标节点未保留在 proxies: %#v", proxyNames)
+	}
+
+	groups, _ := config["proxy-groups"].([]any)
+	members := make(map[string]map[string]bool)
+	for _, rawGroup := range groups {
+		group, ok := rawGroup.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := group["name"].(string)
+		members[name] = make(map[string]bool)
+		items, _ := group["proxies"].([]any)
+		for _, item := range items {
+			if member, ok := item.(string); ok {
+				members[name][member] = true
+			}
+		}
+	}
+	if !members["Chain"]["front"] || !members["Chain"]["target"] {
+		t.Fatalf("链式代理组成员被错误过滤: %#v", members["Chain"])
+	}
+	if !members["Main"]["target"] || members["Main"]["front"] {
+		t.Fatalf("普通代理组前置节点处理错误: %#v", members["Main"])
 	}
 }
 
