@@ -2369,11 +2369,19 @@
     "page": {
       "title": "链式代理管理",
       "subtitle": "集中管理各订阅的链式代理策略",
-      "description": "选择订阅后，在此查看和配置所有链式代理规则。",
+      "description": "直接查看所有订阅的链式代理状态，并进入对应订阅配置规则。",
       "subscription": "选择订阅",
       "manage": "管理策略",
       "empty": "暂无订阅，请先创建订阅。",
-      "currentSubscription": "当前订阅：{{name}}"
+      "currentSubscription": "当前订阅：{{name}}",
+      "currentSubscriptionLabel": "当前订阅",
+      "subscriptionCount": "共 {{count}} 个订阅",
+      "enabled": "已启用",
+      "notEnabled": "未启用",
+      "notConfigured": "未配置链式代理规则",
+      "loadingRules": "规则加载中",
+      "ruleSummary": "共 {{total}} 条规则 · {{enabled}} 条启用",
+      "previewHint": "已设置的规则："
     }
   },
   "subscriptions": {
@@ -2637,6 +2645,20 @@
     },
     "chain": {
       "dialogTitle": "链式代理配置",
+      "currentSubscription": "当前订阅",
+      "unnamedSubscription": "未命名订阅",
+      "enabled": "已启用",
+      "notEnabled": "未启用",
+      "ruleSummary": "共 {{total}} 条规则 · {{enabled}} 条启用",
+      "searchRules": "搜索规则或节点名称",
+      "noMatchingRules": "没有匹配的链式代理规则",
+      "invalidConfig": "配置格式错误",
+      "dynamicNodeWithConditions": "动态节点（{{count}} 个条件）",
+      "filter": {
+        "all": "全部",
+        "enabled": "已启用",
+        "disabled": "已停用"
+      },
       "description": "链式代理规则用于配置节点的前置代理（入口代理）。每个落地节点独立匹配规则：按规则顺序检查，应用第一个匹配规则的出口配置。",
       "overlapHint": "提示：若需不同落地节点使用不同出口，请确保各规则的「目标节点」配置不重叠（使用「指定节点」或「按条件筛选」精确定义目标范围）。",
       "unnamedRule": "未命名规则",
@@ -2758,6 +2780,16 @@
         "landing": "落地",
         "matchedCount": "已匹配: {{count}}",
         "unmatchedCount": "未匹配: {{count}}",
+        "diagnostics": {
+          "healthy": "当前订阅链式代理配置正常，未发现明显问题。",
+          "emptyChain": "规则「{{name}}」没有配置入口链路。",
+          "missingReference": "规则「{{name}}」存在失效引用：{{reference}}。",
+          "noTarget": "规则「{{name}}」没有匹配到目标节点。",
+          "fullyCovered": "规则「{{name}}」的目标节点已被前面的规则覆盖，当前不会生效。",
+          "unmatchedNodes": "有 {{count}} 个节点未命中任何链式代理规则，将使用节点自身配置。"
+        },
+        "matchReason": "命中「{{rule}}」，入口：{{entry}}，最终前置：{{dialer}}",
+        "unmatchedReason": "未命中规则，将使用节点自身配置",
         "containsNodes": "包含节点",
         "latency": "延迟",
         "speed": "速度",

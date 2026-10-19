@@ -6,6 +6,24 @@ import (
 	"sublink/models"
 )
 
+func TestBuildRulePreviewDataTemplateGroupMembers(t *testing.T) {
+	rule := models.SubscriptionChainRule{
+		ID: 1, Name: "template", Enabled: true,
+		ChainConfig:  `[{"type":"template_group","groupName":"OpenAI"}]`,
+		TargetConfig: `{"type":"all"}`,
+	}
+	nodes := []models.Node{{ID: 1, Name: "node-one"}, {ID: 2, Name: "node-two"}}
+	names := map[int]string{1: nodes[0].EffectiveName(), 2: nodes[1].EffectiveName()}
+	info := map[int]models.Node{1: nodes[0], 2: nodes[1]}
+
+	preview := buildRulePreviewData(rule, nodes, names, info, map[string][]string{
+		"OpenAI": {"node-one", "node-two"},
+	})
+	if len(preview.Links) != 1 || len(preview.Links[0].Nodes) != 2 {
+		t.Fatalf("expected template group to show two members, got %#v", preview.Links)
+	}
+}
+
 func TestBuildRulePreviewDataSpecifiedNodes(t *testing.T) {
 	rule := models.SubscriptionChainRule{
 		ID: 1, Name: "selected", Enabled: true,

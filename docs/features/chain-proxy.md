@@ -76,6 +76,12 @@ Both **intermediate nodes** and **target nodes** support dynamic condition based
 > [!NOTE]
 > Chain proxy rules are **saved per subscription and applied during subscription generation**. They are not global runtime proxy rules. Template proxy groups come from the Clash template associated with the subscription. Final generated nodes implement the chain through Clash `dialer-proxy`.
 
+### Chain proxy management page
+
+The management page lists all subscriptions directly. Each subscription card shows its rule total, enabled count, and concrete references (entry/intermediate nodes → target nodes), and opens its policy manager directly. The most recently opened subscription is highlighted. Policy management supports searching within the current subscription by rule name, entry node, or target node, as well as filtering by enabled state; searches and filters never cross subscription boundaries.
+
+Use “Preview full chain” to inspect configured chains, rule priority, and fallback behavior for the current subscription. Template proxy groups expand nested groups and `use`/`include-all` provider placeholders, then show actual members from the current subscription node set instead of incorrectly reporting zero members because of template placeholders. The preview diagnoses missing node references, empty chains, rules with no targets, rules fully covered by earlier rules, and unmatched nodes. The node-match table also explains the matched rule, entry proxy, and final dialer for each node. “Configured” does not mean all traffic uses one chain: the effective chain is still determined by rule conditions and priority.
+
 ### Multiple policies and landing-node sets
 
 A subscription can contain multiple ordered policies, for example `Hong Kong relay group → US landing nodes` and `Japan relay group → Singapore landing nodes`. Each policy can select its own entry group/node and a set of landing nodes. The lower sort value is evaluated first; when a policy matches, its entry chain overrides the matched node's own `DialerProxyName`. If no policy matches, the node-level `DialerProxyName` remains the fallback.

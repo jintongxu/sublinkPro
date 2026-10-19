@@ -2369,11 +2369,19 @@
     "page": {
       "title": "Chain Proxy Management",
       "subtitle": "Manage chain proxy policies across subscriptions",
-      "description": "Select a subscription to view and configure all of its chain proxy rules.",
+      "description": "View chain proxy status for all subscriptions and open each subscription's rules directly.",
       "subscription": "Subscription",
       "manage": "Manage policies",
       "empty": "No subscriptions yet. Create a subscription first.",
-      "currentSubscription": "Current subscription: {{name}}"
+      "currentSubscription": "Current subscription: {{name}}",
+      "currentSubscriptionLabel": "Current subscription",
+      "subscriptionCount": "{{count}} subscriptions",
+      "enabled": "Enabled",
+      "notEnabled": "Not enabled",
+      "notConfigured": "No chain proxy rules configured",
+      "loadingRules": "Loading rules",
+      "ruleSummary": "{{total}} rules · {{enabled}} enabled",
+      "previewHint": "Configured rules:"
     }
   },
   "subscriptions": {
@@ -2637,6 +2645,20 @@
     },
     "chain": {
       "dialogTitle": "Chain Proxy Configuration",
+      "currentSubscription": "Current subscription",
+      "unnamedSubscription": "Unnamed subscription",
+      "enabled": "Enabled",
+      "notEnabled": "Not enabled",
+      "ruleSummary": "{{total}} rules · {{enabled}} enabled",
+      "searchRules": "Search rules or node names",
+      "noMatchingRules": "No matching chain proxy rules",
+      "invalidConfig": "Invalid configuration",
+      "dynamicNodeWithConditions": "Dynamic node ({{count}} conditions)",
+      "filter": {
+        "all": "All",
+        "enabled": "Enabled",
+        "disabled": "Disabled"
+      },
       "description": "Chain proxy rules configure a node's upstream entry proxy. Each landing node matches rules independently in order and uses the first matching rule's outbound configuration.",
       "overlapHint": "Tip: if different landing nodes need different outbound paths, make sure each rule's target node configuration does not overlap. Use “Specified node” or “By conditions” to define precise target scopes.",
       "unnamedRule": "Unnamed rule",
@@ -2758,6 +2780,16 @@
         "landing": "Landing",
         "matchedCount": "Matched: {{count}}",
         "unmatchedCount": "Unmatched: {{count}}",
+        "diagnostics": {
+          "healthy": "This subscription's chain proxy configuration looks healthy.",
+          "emptyChain": "Rule “{{name}}” has no entry chain configured.",
+          "missingReference": "Rule “{{name}}” has a missing reference: {{reference}}.",
+          "noTarget": "Rule “{{name}}” did not match any target nodes.",
+          "fullyCovered": "Rule “{{name}}” is fully covered by earlier rules and will not take effect.",
+          "unmatchedNodes": "{{count}} nodes did not match a chain proxy rule and will use their own node configuration."
+        },
+        "matchReason": "Matched “{{rule}}”; entry: {{entry}}; final dialer: {{dialer}}",
+        "unmatchedReason": "No rule matched; the node's own configuration will be used",
         "containsNodes": "Contains nodes",
         "latency": "Latency",
         "speed": "Speed",

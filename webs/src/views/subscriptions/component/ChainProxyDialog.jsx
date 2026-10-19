@@ -9,6 +9,8 @@ import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
+import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
 import Paper from '@mui/material/Paper';
 import Chip from '@mui/material/Chip';
 import Switch from '@mui/material/Switch';
@@ -29,6 +31,8 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import TouchAppIcon from '@mui/icons-material/TouchApp';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import SearchIcon from '@mui/icons-material/Search';
+import FilterListIcon from '@mui/icons-material/FilterList';
 
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import {
@@ -79,6 +83,8 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const [ruleSearch, setRuleSearch] = useState('');
+  const [ruleStatus, setRuleStatus] = useState('all');
 
   const getErrorMessage = (error, fallback) =>
     error?.response?.data?.error || error?.response?.data?.msg || error?.message || fallback;
@@ -170,9 +176,15 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
   const handleDragEnd = async (result) => {
     if (!result.destination) return;
 
+    const sourceRule = filteredRules[result.source.index];
+    const destinationRule = filteredRules[result.destination.index];
+    if (!sourceRule || !destinationRule || sourceRule.id === destinationRule.id) return;
+
     const items = Array.from(rules);
-    const [reorderedItem] = items.splice(result.source.index, 1);
-    items.splice(result.destination.index, 0, reorderedItem);
+    const sourceIndex = items.findIndex((rule) => rule.id === sourceRule.id);
+    const destinationIndex = items.findIndex((rule) => rule.id === destinationRule.id);
+    const [reorderedItem] = items.splice(sourceIndex, 1);
+    items.splice(destinationIndex, 0, reorderedItem);
     setRules(items);
 
     try {
@@ -273,6 +285,22 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
     }
   };
 
+  const enabledRuleCount = rules.filter((rule) => rule.enabled !== false).length;
+  const filteredRules = rules.filter((rule) => {
+    const isEnabled = rule.enabled !== false;
+    if (ruleStatus === 'enabled' && !isEnabled) return false;
+    if (ruleStatus === 'disabled' && isEnabled) return false;
+    const keyword = ruleSearch.trim().toLowerCase();
+    if (!keyword) return true;
+    const chainNames = parseChainConfig(rule.chainConfig).join(' ');
+    const targetName = parseTargetConfig(rule.targetConfig);
+    return [rule.name, chainNames, targetName, rule.chainConfig, rule.targetConfig]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(keyword);
+  });
+
   return (
     <>
       <Dialog
@@ -343,6 +371,37 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
 
           {!loading && !editMode && (
             <Box>
+              <Paper
+                variant="outlined"
+                sx={{
+                  mb: 2,
+                  p: 2,
+                  borderRadius: 2,
+                  bgcolor: selectedSurface,
+                  borderColor: primaryStrongBorder,
+                  boxShadow: cardShadow
+                }}
+              >
+                <Stack direction={isMobile ? 'column' : 'row'} spacing={2} alignItems={isMobile ? 'stretch' : 'center'} justifyContent="space-between">
+                  <Box>
+                    <Typography variant="overline" sx={{ color: secondaryText, letterSpacing: 0.5 }}>
+                      {t('subscriptions.chain.currentSubscription')}
+                    </Typography>
+                    <Typography variant="subtitle1" fontWeight={700} sx={{ color: primaryText }} noWrap>
+                      {subscription?.Name || t('subscriptions.chain.unnamedSubscription')}
+                    </Typography>
+                  </Box>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Chip
+                      size="small"
+                      color={enabledRuleCount > 0 ? 'success' : 'default'}
+                      label={enabledRuleCount > 0 ? t('subscriptions.chain.enabled') : t('subscriptions.chain.notEnabled')}
+                    />
+                    <Chip size="small" variant="outlined" label={t('subscriptions.chain.ruleSummary', { total: rules.length, enabled: enabledRuleCount })} />
+                  </Stack>
+                </Stack>
+              </Paper>
+
               <Box
                 sx={{
                   mb: 2,
@@ -373,9 +432,41 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
                 </Typography>
               </Box>
 
+              <Stack direction={isMobile ? 'column' : 'row'} spacing={1} sx={{ mb: 2 }} alignItems={isMobile ? 'stretch' : 'center'}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  value={ruleSearch}
+                  onChange={(event) => setRuleSearch(event.target.value)}
+                  placeholder={t('subscriptions.chain.searchRules')}
+                  aria-label={t('subscriptions.chain.searchRules')}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon fontSize="small" />
+                      </InputAdornment>
+                    )
+                  }}
+                />
+                <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
+                  <FilterListIcon fontSize="small" sx={{ color: secondaryText }} />
+                  {['all', 'enabled', 'disabled'].map((status) => (
+                    <Chip
+                      key={status}
+                      size="small"
+                      clickable
+                      color={ruleStatus === status ? 'primary' : 'default'}
+                      variant={ruleStatus === status ? 'filled' : 'outlined'}
+                      label={t(`subscriptions.chain.filter.${status}`)}
+                      onClick={() => setRuleStatus(status)}
+                    />
+                  ))}
+                </Stack>
+              </Stack>
+
               {isMobile ? (
                 <Stack spacing={1.5}>
-                  {rules.map((rule) => (
+                  {filteredRules.map((rule) => (
                     <Card
                       key={rule.id}
                       variant="outlined"
@@ -442,7 +533,7 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
                   <Droppable droppableId="chain-rules">
                     {(provided) => (
                       <Stack spacing={1} {...provided.droppableProps} ref={provided.innerRef}>
-                        {rules.map((rule, index) => (
+                        {filteredRules.map((rule, index) => (
                           <Draggable key={rule.id} draggableId={String(rule.id)} index={index}>
                             {(provided, snapshot) => (
                               <Paper
@@ -497,6 +588,15 @@ export default function ChainProxyDialog({ open, onClose, subscription }) {
                     )}
                   </Droppable>
                 </DragDropContext>
+              )}
+
+              {rules.length > 0 && filteredRules.length === 0 && (
+                <Paper
+                  variant="outlined"
+                  sx={{ p: 3, mb: 2, textAlign: 'center', borderRadius: 2, bgcolor: elevatedSurface, borderColor: softBorder }}
+                >
+                  <Typography sx={{ color: secondaryText }}>{t('subscriptions.chain.noMatchingRules')}</Typography>
+                </Paper>
               )}
 
               {rules.length === 0 && (

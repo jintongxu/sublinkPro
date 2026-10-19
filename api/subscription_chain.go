@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+
 	"sublink/cache"
 	"sublink/models"
 	"sublink/utils"
@@ -426,6 +428,123 @@ func parseTemplateProxyGroups(configStr string) []string {
 	return groupNames
 }
 
+// parseTemplateProxyGroupMembers 返回模板代理组中实际引用的节点名称。
+// 预览阶段会再将这些引用映射到当前订阅节点，避免把模板中的其他代理组误显示为节点。
+func parseTemplateProxyGroupMembers(configStr string) map[string][]string {
+	members := make(map[string][]string)
+	if configStr == "" {
+		return members
+	}
+
+	var config struct {
+		Clash string `json:"clash"`
+	}
+	if err := json.Unmarshal([]byte(configStr), &config); err != nil || config.Clash == "" {
+		return members
+	}
+
+	var templateContent string
+	if strings.Contains(config.Clash, "://") {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, config.Clash, nil)
+		if err != nil {
+			return members
+		}
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return members
+		}
+		defer func() { _ = resp.Body.Close() }()
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return members
+		}
+		templateContent = string(data)
+	} else {
+		filename := filepath.Base(config.Clash)
+		if cached, ok := cache.GetTemplateContent(filename); ok {
+			templateContent = cached
+		} else {
+			data, err := os.ReadFile(config.Clash)
+			if err != nil {
+				return members
+			}
+			templateContent = string(data)
+		}
+	}
+
+	var clashConfig map[string]any
+	if err := yaml.Unmarshal([]byte(templateContent), &clashConfig); err != nil {
+		return members
+	}
+	proxyGroups, ok := clashConfig["proxy-groups"].([]any)
+	if !ok {
+		return members
+	}
+
+	groups := make(map[string]map[string]any)
+	for _, rawGroup := range proxyGroups {
+		group, ok := rawGroup.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, ok := group["name"].(string)
+		if ok && name != "" {
+			groups[name] = group
+		}
+	}
+
+	var resolveGroup func(string, map[string]bool) []string
+	resolveGroup = func(name string, visiting map[string]bool) []string {
+		if visiting[name] {
+			return nil
+		}
+		group, ok := groups[name]
+		if !ok {
+			return []string{name}
+		}
+		visiting[name] = true
+		defer delete(visiting, name)
+
+		resolved := make([]string, 0)
+		appendReference := func(reference string) {
+			if reference == "" {
+				return
+			}
+			if reference == "__ALL_PROXIES__" || reference == "__ALL_PROVIDERS__" || reference == "__ALL__" {
+				resolved = append(resolved, reference)
+				return
+			}
+			resolved = append(resolved, resolveGroup(reference, visiting)...)
+		}
+
+		if proxies, ok := group["proxies"].([]any); ok {
+			for _, rawProxy := range proxies {
+				if proxyName, ok := rawProxy.(string); ok {
+					appendReference(proxyName)
+				}
+			}
+		}
+		// Provider-backed groups do not carry their members in the template.
+		// The subscription node set is the best available preview of them.
+		if use, ok := group["use"].([]any); ok && len(use) > 0 {
+			resolved = append(resolved, "__ALL_PROVIDERS__")
+		}
+		if includeAll, ok := group["include-all"].(bool); ok && includeAll {
+			resolved = append(resolved, "__ALL_PROXIES__")
+		}
+		if includeAll, ok := group["include-all-providers"].(bool); ok && includeAll {
+			resolved = append(resolved, "__ALL_PROVIDERS__")
+		}
+		return resolved
+	}
+
+	for name := range groups {
+		members[name] = resolveGroup(name, make(map[string]bool))
+	}
+	return members
+}
+
 // ChainLinkPreviewNode 链路预览中的节点信息
 type ChainLinkPreviewNode struct {
 	Name        string  `json:"name"`
@@ -524,6 +643,7 @@ func PreviewChainLinks(c *gin.Context) {
 
 	// 获取所有规则（按排序）
 	rules := models.GetChainRulesBySubscriptionID(subID)
+	templateGroupMembers := parseTemplateProxyGroupMembers(sub.Config)
 
 	// 筛选启用的规则
 	enabledRules := make([]models.SubscriptionChainRule, 0)
@@ -539,7 +659,7 @@ func PreviewChainLinks(c *gin.Context) {
 	// 构建规则预览数据（考虑覆盖策略）
 	var rulesPreview []ChainPreviewResult
 	for _, rule := range rules {
-		ruleData := buildRulePreviewData(rule, sub.Nodes, nodeNameMap, nodeInfoMap)
+		ruleData := buildRulePreviewData(rule, sub.Nodes, nodeNameMap, nodeInfoMap, templateGroupMembers)
 
 		// 只有启用的规则才计算生效节点
 		if rule.Enabled {
@@ -588,7 +708,11 @@ func PreviewChainLinks(c *gin.Context) {
 }
 
 // buildRulePreviewData 构建单条规则的预览数据
-func buildRulePreviewData(rule models.SubscriptionChainRule, nodes []models.Node, nodeNameMap map[int]string, nodeInfoMap map[int]models.Node) ChainPreviewResult {
+func buildRulePreviewData(rule models.SubscriptionChainRule, nodes []models.Node, nodeNameMap map[int]string, nodeInfoMap map[int]models.Node, templateGroupMembersList ...map[string][]string) ChainPreviewResult {
+	templateGroupMembers := map[string][]string{}
+	if len(templateGroupMembersList) > 0 && templateGroupMembersList[0] != nil {
+		templateGroupMembers = templateGroupMembersList[0]
+	}
 	data := ChainPreviewResult{
 		RuleID:   rule.ID,
 		RuleName: rule.Name,
@@ -617,6 +741,20 @@ func buildRulePreviewData(rule models.SubscriptionChainRule, nodes []models.Node
 		case "template_group":
 			previewItem.Name = item.GroupName
 			previewItem.GroupType = "select"
+			for _, memberName := range templateGroupMembers[item.GroupName] {
+				if memberName == "__ALL_PROXIES__" || memberName == "__ALL_PROVIDERS__" || memberName == "__ALL__" {
+					for _, node := range nodes {
+						previewItem.Nodes = append(previewItem.Nodes, buildChainLinkPreviewNode(node))
+					}
+					continue
+				}
+				for _, node := range nodes {
+					if node.EffectiveName() == memberName {
+						previewItem.Nodes = append(previewItem.Nodes, buildChainLinkPreviewNode(node))
+						break
+					}
+				}
+			}
 
 		case "custom_group":
 			previewItem.Name = item.GroupName

@@ -11,6 +11,7 @@ import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
+import Alert from '@mui/material/Alert';
 import Collapse from '@mui/material/Collapse';
 import CircularProgress from '@mui/material/CircularProgress';
 import Tab from '@mui/material/Tab';
@@ -485,6 +486,52 @@ RuleChainFlow.propTypes = {
   theme: PropTypes.object.isRequired
 };
 
+function PreviewDiagnostics({ rules, matchSummary }) {
+  const { t } = useTranslation();
+  const diagnostics = [];
+
+  rules.forEach((rule) => {
+    if (!rule.enabled) return;
+    if (!rule.links?.length) {
+      diagnostics.push({ severity: 'warning', text: t('subscriptions.chain.preview.diagnostics.emptyChain', { name: rule.ruleName || t('subscriptions.chain.unnamedRule') }) });
+    }
+    const missingLink = rule.links?.find((link) => link.name?.includes('节点不存在') || link.name?.includes('无匹配节点'));
+    if (missingLink) {
+      diagnostics.push({ severity: 'error', text: t('subscriptions.chain.preview.diagnostics.missingReference', { name: rule.ruleName || t('subscriptions.chain.unnamedRule'), reference: missingLink.name }) });
+    }
+    if (!rule.targetNodes?.length) {
+      diagnostics.push({ severity: 'warning', text: t('subscriptions.chain.preview.diagnostics.noTarget', { name: rule.ruleName || t('subscriptions.chain.unnamedRule') }) });
+    }
+    if (rule.fullyCovered) {
+      diagnostics.push({ severity: 'warning', text: t('subscriptions.chain.preview.diagnostics.fullyCovered', { name: rule.ruleName || t('subscriptions.chain.unnamedRule') }) });
+    }
+  });
+
+  const unmatchedCount = matchSummary?.filter((node) => node.unmatched).length || 0;
+  if (unmatchedCount > 0) {
+    diagnostics.push({ severity: 'info', text: t('subscriptions.chain.preview.diagnostics.unmatchedNodes', { count: unmatchedCount }) });
+  }
+
+  if (diagnostics.length === 0) {
+    return <Alert severity="success" sx={{ mb: 2 }}>{t('subscriptions.chain.preview.diagnostics.healthy')}</Alert>;
+  }
+
+  return (
+    <Stack spacing={1} sx={{ mb: 2 }}>
+      {diagnostics.map((item, index) => (
+        <Alert key={`${item.severity}-${index}`} severity={item.severity} sx={{ py: 0.25 }}>
+          {item.text}
+        </Alert>
+      ))}
+    </Stack>
+  );
+}
+
+PreviewDiagnostics.propTypes = {
+  rules: PropTypes.array.isRequired,
+  matchSummary: PropTypes.array
+};
+
 function NodeMatchTable({ matchSummary, isMobile }) {
   const { t } = useTranslation();
   const theme = useTheme();
@@ -564,11 +611,25 @@ function NodeMatchTable({ matchSummary, isMobile }) {
                 </TableCell>
                 <TableCell>
                   {node.unmatched ? (
-                    <Typography variant="caption" sx={{ color: tertiaryText }}>
-                      {t('common.none', 'None')}
-                    </Typography>
+                    <Stack spacing={0.25}>
+                      <Typography variant="caption" sx={{ color: tertiaryText }}>
+                        {t('common.none', 'None')}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: tertiaryText }}>
+                        {t('subscriptions.chain.preview.unmatchedReason')}
+                      </Typography>
+                    </Stack>
                   ) : (
-                    <Typography variant="body2">{node.matchedRule}</Typography>
+                    <Stack spacing={0.25}>
+                      <Typography variant="body2">{node.matchedRule}</Typography>
+                      <Typography variant="caption" sx={{ color: tertiaryText }}>
+                        {t('subscriptions.chain.preview.matchReason', {
+                          rule: node.matchedRule,
+                          entry: node.entryProxy || '-',
+                          dialer: node.finalDialer || '-'
+                        })}
+                      </Typography>
+                    </Stack>
                   )}
                 </TableCell>
                 <TableCell>
@@ -706,6 +767,7 @@ export default function ChainPreviewDialog({ open, onClose, loading, data }) {
 
             {tab === 0 && (
               <Box>
+                <PreviewDiagnostics rules={rules} matchSummary={matchSummary} />
                 <Typography
                   variant="caption"
                   color="text.secondary"
@@ -728,7 +790,12 @@ export default function ChainPreviewDialog({ open, onClose, loading, data }) {
               </Box>
             )}
 
-            {tab === 1 && <NodeMatchTable matchSummary={matchSummary} isMobile={isMobile} />}
+            {tab === 1 && (
+              <Box>
+                <PreviewDiagnostics rules={rules} matchSummary={matchSummary} />
+                <NodeMatchTable matchSummary={matchSummary} isMobile={isMobile} />
+              </Box>
+            )}
           </>
         )}
       </DialogContent>
