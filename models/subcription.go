@@ -1479,20 +1479,15 @@ func (sub *Subcription) PreviewSub() (*PreviewResult, error) {
 
 	// 构建预览节点列表
 	previewNodes := make([]PreviewNode, 0, filteredCount)
-	nodeNamePlan := BuildSubscriptionNodeNamePlan(
-		sub.Nodes,
-		sub.NodeNamePreprocess,
-		sub.NodeNameRule,
-		utils.GetProtocolFromLink,
-		NodeNamePlanOptions{MarkAirportSource: true},
-	)
+	nodeNamePlan := BuildNodeNamePlan(sub.Nodes, sub.NodeNamePreprocess, sub.NodeNameRule, utils.GetProtocolFromLink)
 
 	for idx, node := range sub.Nodes {
 		// 计算预览名称
 		previewName := nodeNamePlan.NodeNameAt(idx, node.ID)
-		previewLink := nodeNamePlan.RenameOutputLink(idx, node.ID, node.Link)
-		if previewName == node.EffectiveName() && !strings.Contains(node.Link, ",") {
-			previewLink = node.Link
+		previewLink := node.Link
+
+		if sub.NodeNameRule != "" {
+			previewLink = nodeNamePlan.RenameOutputLink(idx, node.ID, node.Link)
 		}
 
 		previewNodes = append(previewNodes, PreviewNode{

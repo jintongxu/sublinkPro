@@ -289,6 +289,7 @@
         "logoOptional": "Logo (optional)",
         "subscriptionUrl": "Subscription URL",
         "websiteUrl": "Official website (optional)",
+        "shortIdentifier": "Node name short identifier (optional)",
         "nodeGroup": "Node group",
         "remark": "Remark"
       },
@@ -296,13 +297,15 @@
         "name": "Airport names must be unique. The name is used as the node source.",
         "subscriptionUrl": "Supports Clash YAML subscriptions and V2Ray Base64 subscriptions",
         "websiteUrl": "When set, the airport card shows a clickable link to the official website",
+        "shortIdentifier": "Airport node names get @identifier appended, e.g. node@airport",
         "nodeGroup": "Nodes imported from this airport will automatically belong to this group",
         "remark": "Optional notes to help you manage airports and subscriptions",
         "userAgent": "User-Agent used when pulling subscriptions. Leave blank if not needed."
       },
       "placeholders": {
         "remark": "Optional memo for this airport",
-        "userAgent": "Select or enter"
+        "userAgent": "Select or enter",
+        "shortIdentifier": "Example: three-color or Airport A"
       },
       "logoPicker": {
         "set": "Click to set Logo",
@@ -2826,7 +2829,8 @@
       "moreHidden": "{{count}} more nodes not shown",
       "loading": "Loading node list...",
       "noMatch": "No matching nodes found",
-      "noSelected": "No selected nodes yet"
+      "noSelected": "No selected nodes yet",
+      "airportSource": "Airport: {{source}}"
     },
     "clientUrls": {
       "defaultTitle": "Clients (click QR code to get address)",

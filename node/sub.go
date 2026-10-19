@@ -954,6 +954,10 @@ func scheduleClashToNodeLinks(ctx context.Context, id int, proxys []protocol.Pro
 		Node.SourceSort = proxyIndex + 1
 		if airport != nil {
 			Node.Group = airport.Group
+			if airport.ShortIdentifier != "" {
+				Node.Name = airport.ShortIdentifier + "@" + strings.TrimSpace(proxy.Name)
+				Node.NameMode = models.NodeNameModeRemark
+			}
 		}
 		Node.Protocol = protocol.GetProtocolFromLink(link)
 		Node.ContentHash = contentHash

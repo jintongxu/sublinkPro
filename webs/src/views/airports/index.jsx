@@ -138,6 +138,7 @@ const createAirportFormState = (overrides = {}) => ({
   name: '',
   url: '',
   websiteUrl: '',
+  shortIdentifier: '',
   cronExpr: '0 */12 * * *',
   enabled: true,
   group: '机场',
@@ -520,6 +521,7 @@ export default function AirportList() {
       name: airport.name,
       url: airport.url,
       websiteUrl: airport.websiteUrl || '',
+      shortIdentifier: airport.shortIdentifier || '',
       cronExpr: airport.cronExpr,
       enabled: airport.enabled,
       group: airport.group || '机场',
@@ -780,6 +782,7 @@ export default function AirportList() {
         ...airportForm,
         url: airportForm.url.trim(),
         websiteUrl: airportForm.websiteUrl.trim(),
+        shortIdentifier: airportForm.shortIdentifier.trim(),
         requestHeaders
       };
 

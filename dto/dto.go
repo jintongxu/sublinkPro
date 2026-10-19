@@ -34,6 +34,7 @@ type AirportRequest struct {
 	Name                         string                 `json:"name" binding:"required"`
 	URL                          string                 `json:"url" binding:"required,url"`
 	WebsiteURL                   string                 `json:"websiteUrl" binding:"omitempty,url"`
+	ShortIdentifier              string                 `json:"shortIdentifier"`
 	CronExpr                     string                 `json:"cronExpr" binding:"required"`
 	Enabled                      bool                   `json:"enabled"`
 	Group                        string                 `json:"group"`

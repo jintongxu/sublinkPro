@@ -289,6 +289,7 @@
         "logoOptional": "Logo（可选）",
         "subscriptionUrl": "订阅地址",
         "websiteUrl": "官网地址（可选）",
+        "shortIdentifier": "节点名称短标识（可选）",
         "nodeGroup": "节点分组",
         "remark": "备注"
       },
@@ -296,13 +297,15 @@
         "name": "机场名称不能重复，名称将作为节点来源",
         "subscriptionUrl": "支持 Clash YAML 订阅和 V2Ray Base64 订阅",
         "websiteUrl": "填写后可在机场卡片中点击打开官网",
+        "shortIdentifier": "机场节点名称会追加 @短标识，例如 节点名@三色",
         "nodeGroup": "从此机场导入的节点将自动归属到此分组",
         "remark": "一些备注信息，方便你对机场和订阅进行管理",
         "userAgent": "拉取订阅时使用的 User-Agent，可留空"
       },
       "placeholders": {
         "remark": "可选，记录机场的备忘信息",
-        "userAgent": "选择或输入"
+        "userAgent": "选择或输入",
+        "shortIdentifier": "例如：三色、A机场"
       },
       "logoPicker": {
         "set": "点击设置 Logo",
@@ -2826,7 +2829,8 @@
       "moreHidden": "还有 {{count}} 个节点未显示",
       "loading": "节点列表加载中...",
       "noMatch": "未找到匹配的节点",
-      "noSelected": "暂无已选节点"
+      "noSelected": "暂无已选节点",
+      "airportSource": "机场：{{source}}"
     },
     "clientUrls": {
       "defaultTitle": "客户端（点击二维码获取地址）",

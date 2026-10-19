@@ -72,10 +72,10 @@ func TestPreviewFormSubscriptionIncludesAirportIDs(t *testing.T) {
 	if got, want := len(result.Nodes), 2; got != want {
 		t.Fatalf("preview node count = %d, want %d", got, want)
 	}
-	if got, want := result.Nodes[0].PreviewName, "preview-airport-a@preview-airport"; got != want {
+	if got, want := result.Nodes[0].PreviewName, "preview-airport-a"; got != want {
 		t.Fatalf("first preview node = %q, want %q", got, want)
 	}
-	if got, want := result.Nodes[1].PreviewName, "preview-airport-b@preview-airport"; got != want {
+	if got, want := result.Nodes[1].PreviewName, "preview-airport-b"; got != want {
 		t.Fatalf("second preview node = %q, want %q", got, want)
 	}
 }

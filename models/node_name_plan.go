@@ -7,11 +7,6 @@ import (
 
 const duplicateIndexVariable = "$DuplicateIndex"
 
-// NodeNamePlanOptions controls output-only subscription naming adjustments.
-type NodeNamePlanOptions struct {
-	MarkAirportSource bool
-}
-
 // NodeNamePlan records the final rendered names for subscription output.
 type NodeNamePlan struct {
 	NodeNames   []string
@@ -31,15 +26,10 @@ type nodeNameOccurrence struct {
 
 // BuildNodeNamePlan renders node names in output order and applies duplicate indexes only when requested.
 func BuildNodeNamePlan(nodes []Node, nodeNamePreprocess string, nodeNameRule string, protocolFromLink func(string) string) NodeNamePlan {
-	return buildNodeNamePlan(nodes, nodeNamePreprocess, nodeNameRule, protocolFromLink, NodeNamePlanOptions{})
+	return buildNodeNamePlan(nodes, nodeNamePreprocess, nodeNameRule, protocolFromLink)
 }
 
-// BuildSubscriptionNodeNamePlan builds final subscription names and optionally appends the airport source.
-func BuildSubscriptionNodeNamePlan(nodes []Node, nodeNamePreprocess string, nodeNameRule string, protocolFromLink func(string) string, options NodeNamePlanOptions) NodeNamePlan {
-	return buildNodeNamePlan(nodes, nodeNamePreprocess, nodeNameRule, protocolFromLink, options)
-}
-
-func buildNodeNamePlan(nodes []Node, nodeNamePreprocess string, nodeNameRule string, protocolFromLink func(string) string, options NodeNamePlanOptions) NodeNamePlan {
+func buildNodeNamePlan(nodes []Node, nodeNamePreprocess string, nodeNameRule string, protocolFromLink func(string) string) NodeNamePlan {
 	if protocolFromLink == nil {
 		protocolFromLink = func(string) string { return "" }
 	}
@@ -93,9 +83,7 @@ func buildNodeNamePlan(nodes []Node, nodeNamePreprocess string, nodeNameRule str
 				duplicateIndex,
 			)
 		}
-		if options.MarkAirportSource {
-			finalName = appendAirportSource(finalName, occurrence.node)
-		}
+
 		plan.setName(occurrence.nodeIndex, occurrence.linkIndex, occurrence.node.ID, finalName)
 	}
 
@@ -104,10 +92,15 @@ func buildNodeNamePlan(nodes []Node, nodeNamePreprocess string, nodeNameRule str
 
 // BuildNodeExportName renders one node name with the current rename variables.
 func BuildNodeExportName(node Node, processedLinkName string, nodeNameRule string, protocolName string, index int, duplicateIndex int) string {
+	baseName := normalizeAirportOutputName(node, node.EffectiveName())
 	if nodeNameRule == "" {
-		return node.EffectiveName()
+		return baseName
 	}
 	return utils.RenameNode(nodeNameRule, BuildNodeRenameInfo(node, processedLinkName, protocolName, index, duplicateIndex))
+}
+
+func normalizeAirportOutputName(node Node, name string) string {
+	return strings.TrimSpace(name)
 }
 
 // NodeNameRuleUsesDuplicateIndex reports whether the rename rule opts into duplicate numbering.
@@ -160,15 +153,6 @@ func (plan NodeNamePlan) setName(nodeIndex int, linkIndex int, nodeID int, name 
 			plan.NodeNameMap[nodeID] = name
 		}
 	}
-}
-
-func appendAirportSource(name string, node Node) string {
-	name = strings.TrimSpace(name)
-	source := strings.TrimSpace(node.Source)
-	if node.SourceID <= 0 || source == "" || source == "manual" || name == "" {
-		return name
-	}
-	return name + "@" + source
 }
 
 func splitNodeOutputLinks(link string) []string {

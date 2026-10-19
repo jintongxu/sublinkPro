@@ -115,20 +115,16 @@ func previewSavedSubscription(subID int) (*models.PreviewResult, error) {
 
 	// 构建预览节点列表
 	previewNodes := make([]models.PreviewNode, 0, filteredCount)
-	nodeNamePlan := models.BuildSubscriptionNodeNamePlan(
-		sub.Nodes,
-		sub.NodeNamePreprocess,
-		sub.NodeNameRule,
-		utils.GetProtocolFromLink,
-		models.NodeNamePlanOptions{MarkAirportSource: true},
-	)
+	nodeNamePlan := models.BuildNodeNamePlan(sub.Nodes, sub.NodeNamePreprocess, sub.NodeNameRule, utils.GetProtocolFromLink)
 
 	for idx, node := range sub.Nodes {
 		// 计算预览名称
-		previewName := nodeNamePlan.NodeNameAt(idx, node.ID)
-		previewLink := nodeNamePlan.RenameOutputLink(idx, node.ID, node.Link)
-		if previewName == node.EffectiveName() && !strings.Contains(node.Link, ",") {
-			previewLink = node.Link
+		previewName := node.EffectiveName()
+		previewLink := node.Link
+
+		if sub.NodeNameRule != "" {
+			previewName = nodeNamePlan.NodeNameAt(idx, node.ID)
+			previewLink = nodeNamePlan.RenameOutputLink(idx, node.ID, node.Link)
 		}
 
 		previewNodes = append(previewNodes, models.PreviewNode{

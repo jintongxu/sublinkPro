@@ -70,6 +70,7 @@ type Airport struct {
 	Name              string                `json:"name"`                                   // 机场名称（唯一）
 	URL               string                `json:"url"`                                    // 订阅地址
 	WebsiteURL        string                `json:"websiteUrl"`                             // 机场官网地址
+	ShortIdentifier   string                `json:"shortIdentifier"`                        // 节点名称后缀短标识
 	CronExpr          string                `json:"cronExpr"`                               // 定时更新Cron表达式
 	Enabled           bool                  `json:"enabled"`                                // 是否启用
 	SuccessCount      int                   `gorm:"default:0" json:"successCount"`          // 成功拉取次数
@@ -157,7 +158,7 @@ func (a *Airport) Add() error {
 func (a *Airport) Update() error {
 	a.normalizeCountryFillSettings()
 	err := database.DB.Model(a).Select(
-		"Name", "URL", "WebsiteURL", "CronExpr", "Enabled", "LastRunTime", "NextRunTime",
+		"Name", "URL", "WebsiteURL", "ShortIdentifier", "CronExpr", "Enabled", "LastRunTime", "NextRunTime",
 		"SuccessCount", "Group", "DownloadWithProxy", "ProxyLink", "UserAgent",
 		"RequestHeaders",
 		"FetchUsageInfo", "SkipTLSVerify", "UpdateAfterDetect", "UpdateAfterDetectProfileID", "UpdateAfterDetectChangedOnly", "Remark", "Logo",
@@ -373,9 +374,66 @@ func ListNodesByAirportID(airportID int) ([]Node, error) {
 	return ListBySourceID(airportID)
 }
 
-// UpdateNodesByAirportID 更新机场关联节点的来源名称和分组
-func UpdateNodesByAirportID(airportID int, name string, group string) error {
-	return UpdateNodesBySourceID(airportID, name, group)
+// UpdateNodesByAirportID 更新机场关联节点的来源名称、分组和短标识名称
+func UpdateNodesByAirportID(airportID int, name string, group string, oldShortIdentifier string, shortIdentifier string) error {
+	nodes, err := ListBySourceID(airportID)
+	if err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		baseName := strings.TrimSpace(node.Name)
+		if baseName == "" {
+			baseName = strings.TrimSpace(node.LinkName)
+		}
+		baseName = normalizeAirportNodeBaseName(baseName, name, oldShortIdentifier)
+		newName := prependAirportShortIdentifier(baseName, shortIdentifier)
+		updates := map[string]any{
+			"source":    name,
+			"group":     group,
+			"name":      newName,
+			"name_mode": NodeNameModeRemark,
+		}
+		if err := database.DB.Model(&Node{}).Where("id = ?", node.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+		if cached, ok := nodeCache.Get(node.ID); ok {
+			cached.Source = name
+			cached.Group = group
+			cached.Name = newName
+			cached.NameMode = NodeNameModeRemark
+			cached.EffectiveNameValue = cached.EffectiveName()
+			nodeCache.Set(node.ID, cached)
+		}
+	}
+	return nil
+}
+
+func normalizeAirportNodeBaseName(name string, airportName string, shortIdentifier string) string {
+	name = strings.TrimSpace(name)
+	shortIdentifier = strings.TrimSpace(shortIdentifier)
+	airportName = strings.TrimSpace(airportName)
+	for {
+		trimmed := name
+		if shortIdentifier != "" {
+			name = strings.TrimPrefix(name, shortIdentifier+"@")
+			name = strings.TrimSuffix(name, "@"+shortIdentifier)
+		}
+		if airportName != "" {
+			name = strings.TrimSuffix(name, "@"+airportName)
+		}
+		if name == trimmed {
+			return name
+		}
+	}
+}
+
+func prependAirportShortIdentifier(name string, shortIdentifier string) string {
+	name = strings.TrimSpace(name)
+	shortIdentifier = strings.TrimSpace(shortIdentifier)
+	if name == "" || shortIdentifier == "" {
+		return name
+	}
+	return shortIdentifier + "@" + name
 }
 
 // AirportBatchUpdateParams 机场批量更新参数

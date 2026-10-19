@@ -299,6 +299,14 @@ export default function NodeTransferBox({
     return selectedNodesList.filter((node) => node.Name?.toLowerCase().includes(query) || node.Group?.toLowerCase().includes(query));
   }, [selectedNodesList, selectedNodeSearch]);
 
+  const getNodeSecondaryText = (node) => {
+    const isAirportNode = String(node.Group || '').trim() === '机场';
+    if (isAirportNode && node.Source && node.Source !== 'manual') {
+      return t('subscriptions.transfer.airportSource', { source: node.Source });
+    }
+    return node.Group || '';
+  };
+
   const handleMobileTabChange = (_event, nextTab) => onMobileTabChange(nextTab);
   const handleSelectedNodeSearchChange = (event) => onSelectedNodeSearchChange(event.target.value);
 
@@ -386,7 +394,7 @@ export default function NodeTransferBox({
                         primary={node.Name}
                         secondary={
                           <Chip
-                            label={node.Group || t('nodes.table.ungrouped')}
+                            label={getNodeSecondaryText(node) || t('nodes.table.ungrouped')}
                             size="small"
                             variant="outlined"
                             sx={{ mt: 0.5, height: 20, fontSize: '0.7rem' }}
@@ -504,7 +512,7 @@ export default function NodeTransferBox({
                         primary={node.Name}
                         secondary={
                           <Chip
-                            label={node.Group || t('nodes.table.ungrouped')}
+                            label={getNodeSecondaryText(node) || t('nodes.table.ungrouped')}
                             size="small"
                             color="success"
                             variant="outlined"
@@ -614,7 +622,7 @@ export default function NodeTransferBox({
                   <Tooltip title={node.Name} placement="top" arrow>
                     <ListItemText
                       primary={node.Name}
-                      secondary={node.Group}
+                      secondary={getNodeSecondaryText(node)}
                       primaryTypographyProps={{
                         noWrap: true,
                         fontSize: '0.875rem',
@@ -777,7 +785,7 @@ export default function NodeTransferBox({
                       primary={node.Name}
                       secondary={
                         <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
-                          {node.Group}
+                          {getNodeSecondaryText(node)}
                           {chainTargetNodeGroups.has(Number(node.ID)) && (
                             <Chip
                               size="small"

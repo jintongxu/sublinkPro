@@ -210,6 +210,15 @@ export default function AirportFormDialog({
                 helperText={t('airports.form.helpers.name')}
                 onChange={(e) => setAirportForm({ ...airportForm, name: e.target.value })}
               />
+              <TextField
+                fullWidth
+                size="small"
+                label={t('airports.form.fields.shortIdentifier')}
+                value={airportForm.shortIdentifier}
+                helperText={t('airports.form.helpers.shortIdentifier')}
+                placeholder={t('airports.form.placeholders.shortIdentifier')}
+                onChange={(e) => setAirportForm({ ...airportForm, shortIdentifier: e.target.value })}
+              />
               <Box>
                 <Typography variant="body2" sx={{ mb: 1, color: secondaryText }}>
                   {t('airports.form.fields.logoOptional')}
