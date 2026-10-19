@@ -64,6 +64,7 @@ The subscription list clearly shows the state of each airport, including:
 - Next scheduled update time
 - Visual traffic progress bar
 - An optional official website link that opens in a new tab
+- Airport nodes in final subscriptions are marked as “node name@airport name” without changing the stored node name
 
 This gives a direct overview of airport usage.
 

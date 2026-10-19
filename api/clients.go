@@ -387,7 +387,13 @@ func buildRenamedNodeLink(node models.Node, processedLinkName, nodeNameRule, lin
 }
 
 func buildClientNodeNamePlan(sub models.Subcription) models.NodeNamePlan {
-	return models.BuildNodeNamePlan(sub.Nodes, sub.NodeNamePreprocess, sub.NodeNameRule, protocol.GetProtocolFromLink)
+	return models.BuildSubscriptionNodeNamePlan(
+		sub.Nodes,
+		sub.NodeNamePreprocess,
+		sub.NodeNameRule,
+		protocol.GetProtocolFromLink,
+		models.NodeNamePlanOptions{MarkAirportSource: true},
+	)
 }
 
 // buildClashNodeNameMap 预先计算每个节点最终可引用的代理名称。
