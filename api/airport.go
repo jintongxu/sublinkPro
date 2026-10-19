@@ -181,12 +181,15 @@ func AirportAdd(c *gin.Context) {
 
 	group := strings.TrimSpace(req.Group)
 	if group == "" {
-		group = strings.TrimSpace(req.Name)
+		group = "机场"
 	}
+
+	req.WebsiteURL = strings.TrimSpace(req.WebsiteURL)
 
 	airport := models.Airport{
 		Name:                         req.Name,
 		URL:                          req.URL,
+		WebsiteURL:                   req.WebsiteURL,
 		CronExpr:                     req.CronExpr,
 		Enabled:                      req.Enabled,
 		Group:                        group,
@@ -285,12 +288,14 @@ func AirportUpdate(c *gin.Context) {
 	}
 
 	// 更新机场
+	req.WebsiteURL = strings.TrimSpace(req.WebsiteURL)
 	group := strings.TrimSpace(req.Group)
 	if group == "" {
-		group = strings.TrimSpace(req.Name)
+		group = "机场"
 	}
 	existing.Name = req.Name
 	existing.URL = req.URL
+	existing.WebsiteURL = req.WebsiteURL
 	existing.CronExpr = req.CronExpr
 	existing.Enabled = req.Enabled
 	existing.Group = group
@@ -323,7 +328,7 @@ func AirportUpdate(c *gin.Context) {
 	}
 
 	// 同步更新关联节点的来源名称和分组
-	if err := models.UpdateNodesByAirportID(id, req.Name, req.Group); err != nil {
+	if err := models.UpdateNodesByAirportID(id, req.Name, group); err != nil {
 		// 记录错误但不阻断流程
 		utils.Warn("更新关联节点失败: %v", err)
 	}

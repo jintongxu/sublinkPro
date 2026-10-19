@@ -137,9 +137,10 @@ const createAirportFormState = (overrides = {}) => ({
   id: 0,
   name: '',
   url: '',
+  websiteUrl: '',
   cronExpr: '0 */12 * * *',
   enabled: true,
-  group: '',
+  group: '机场',
   downloadWithProxy: false,
   proxyLink: '',
   userAgent: '',
@@ -518,9 +519,10 @@ export default function AirportList() {
       id: airport.id,
       name: airport.name,
       url: airport.url,
+      websiteUrl: airport.websiteUrl || '',
       cronExpr: airport.cronExpr,
       enabled: airport.enabled,
-      group: airport.group || '',
+      group: airport.group || '机场',
       downloadWithProxy: airport.downloadWithProxy || false,
       proxyLink: airport.proxyLink || '',
       userAgent: airport.userAgent || '',
@@ -750,6 +752,10 @@ export default function AirportList() {
       showMessage(t('airports.page.messages.urlInvalid'), 'warning');
       return;
     }
+    if (airportForm.websiteUrl.trim() && !/^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(airportForm.websiteUrl.trim())) {
+      showMessage(t('airports.page.messages.websiteUrlInvalid'), 'warning');
+      return;
+    }
     if (!airportForm.cronExpr.trim()) {
       showMessage(t('airports.page.messages.cronRequired'), 'warning');
       return;
@@ -772,6 +778,8 @@ export default function AirportList() {
     try {
       const normalizedAirportForm = {
         ...airportForm,
+        url: airportForm.url.trim(),
+        websiteUrl: airportForm.websiteUrl.trim(),
         requestHeaders
       };
 

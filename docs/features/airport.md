@@ -63,6 +63,7 @@ The subscription list clearly shows the state of each airport, including:
 - Last update time
 - Next scheduled update time
 - Visual traffic progress bar
+- An optional official website link that opens in a new tab
 
 This gives a direct overview of airport usage.
 
@@ -74,10 +75,11 @@ This gives a direct overview of airport usage.
 
 1. Open the “Airport Management” page.
 2. Click “Add Airport”.
-3. Fill in the subscription link and name.
-4. Configure request settings as needed, such as User-Agent, custom Header, and proxy download.
-5. Configure an update policy, optional. To check nodes immediately after subscription update, enable “post update check” in advanced options and choose a node check profile.
-6. Save and fetch nodes.
+3. Fill in the subscription link and name. Optionally fill in “Official website” to show a clickable link on the airport card.
+4. The airport group defaults to “Airport”, and imported nodes use the airport name as their source. You can change the group in the form if needed.
+5. Configure request settings as needed, such as User-Agent, custom Header, and proxy download.
+6. Configure an update policy, optional. To check nodes immediately after subscription update, enable “post update check” in advanced options and choose a node check profile.
+7. Save and fetch nodes.
 
 After “post update check” is enabled, checks are triggered only when the current airport subscription updates successfully. The check range is limited to nodes from this airport's latest update. It does not wait for the node check profile's own schedule, and it does not expand to nodes from other airports. If “only check changed and new nodes” is enabled, SublinkPro checks only nodes that were added or updated during this fetch; when there are no added or updated nodes, it skips the post update check instead of falling back to all airport nodes. Node check tasks triggered by this feature are marked as “airport update” in Task Center, so they can be distinguished from “manual” and “scheduled” triggers.
 

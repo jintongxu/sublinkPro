@@ -532,7 +532,7 @@ Base: `/api/v1/airports` (all write bodies are JSON)
 
 - **GET** `/airports` (query: `?page=1&pageSize=20`) — list
 - **GET** `/airports/{id}` — one
-- **POST** `/airports` — **JSON** create. Key fields (see `dto.AirportRequest`): `name`(required), `url`(required, valid URL), `cronExpr`(required), `enabled`, `group`, `downloadWithProxy`, `proxyLink`, `userAgent`, `fetchUsageInfo`, `skipTLSVerify`, plus filter/rename/dedup fields (`nodeNameWhitelist`, `nodeNameBlacklist`, `protocolWhitelist`, `protocolBlacklist`, `nodeNamePreprocess`, `deduplicationRule`, `nodeNameUniquify`, ...), and country-fill fields (`autoFillCountry`, `backfillExistingCountry`).
+- **POST** `/airports` — **JSON** create. Key fields (see `dto.AirportRequest`): `name`(required), `url`(required, valid URL), `websiteUrl`(optional, valid URL; official airport website shown as a clickable link in the web UI), `cronExpr`(required), `enabled`, `group`, `downloadWithProxy`, `proxyLink`, `userAgent`, `fetchUsageInfo`, `skipTLSVerify`, plus filter/rename/dedup fields (`nodeNameWhitelist`, `nodeNameBlacklist`, `protocolWhitelist`, `protocolBlacklist`, `nodeNamePreprocess`, `deduplicationRule`, `nodeNameUniquify`, ...), and country-fill fields (`autoFillCountry`, `backfillExistingCountry`).
 - **PUT** `/airports/{id}` — **JSON** update (same schema)
 - **POST** `/airports/batch-update` — **JSON** `{ids:[...], applyGroup, group, applySchedule, cronExpr}`
 - **DELETE** `/airports/{id}` (query: `?deleteNodes=false`)

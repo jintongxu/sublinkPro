@@ -228,6 +228,15 @@ export default function AirportFormDialog({
                 helperText={t('airports.form.helpers.subscriptionUrl')}
                 onChange={(e) => setAirportForm({ ...airportForm, url: e.target.value })}
               />
+              <TextField
+                fullWidth
+                size="small"
+                label={t('airports.form.fields.websiteUrl')}
+                value={airportForm.websiteUrl}
+                helperText={t('airports.form.helpers.websiteUrl')}
+                placeholder="https://example.com"
+                onChange={(e) => setAirportForm({ ...airportForm, websiteUrl: e.target.value })}
+              />
               <Autocomplete
                 freeSolo
                 size="small"
@@ -729,6 +738,7 @@ AirportFormDialog.propTypes = {
     id: PropTypes.number,
     name: PropTypes.string,
     url: PropTypes.string,
+    websiteUrl: PropTypes.string,
     cronExpr: PropTypes.string,
     enabled: PropTypes.bool,
     group: PropTypes.string,

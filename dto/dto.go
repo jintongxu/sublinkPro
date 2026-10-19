@@ -33,6 +33,7 @@ type AirportRequest struct {
 	ID                           int                    `json:"id"`
 	Name                         string                 `json:"name" binding:"required"`
 	URL                          string                 `json:"url" binding:"required,url"`
+	WebsiteURL                   string                 `json:"websiteUrl" binding:"omitempty,url"`
 	CronExpr                     string                 `json:"cronExpr" binding:"required"`
 	Enabled                      bool                   `json:"enabled"`
 	Group                        string                 `json:"group"`

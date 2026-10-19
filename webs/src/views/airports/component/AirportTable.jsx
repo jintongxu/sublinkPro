@@ -23,6 +23,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import LanIcon from '@mui/icons-material/Lan';
 import DownloadIcon from '@mui/icons-material/Download';
+import LanguageIcon from '@mui/icons-material/Language';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import ScheduleIcon from '@mui/icons-material/Schedule';
@@ -448,6 +449,31 @@ export default function AirportTable({
                         <Chip label={airport.group} variant="outlined" size="small" sx={{ height: 18, fontSize: '0.66rem' }} />
                       )}
                     </Stack>
+                    {airport.websiteUrl && (
+                      <Typography
+                        component="a"
+                        href={airport.websiteUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(event) => event.stopPropagation()}
+                        variant="caption"
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 0.35,
+                          mt: 0.5,
+                          color: 'primary.main',
+                          textDecoration: 'none',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          '&:hover': { textDecoration: 'underline' }
+                        }}
+                      >
+                        <LanguageIcon sx={{ fontSize: 13, flexShrink: 0 }} />
+                        {airport.websiteUrl}
+                      </Typography>
+                    )}
                   </Box>
                 </Box>
 

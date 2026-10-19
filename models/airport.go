@@ -69,6 +69,7 @@ type Airport struct {
 	ID                int                   `gorm:"primaryKey;autoIncrement" json:"id"`
 	Name              string                `json:"name"`                                   // 机场名称（唯一）
 	URL               string                `json:"url"`                                    // 订阅地址
+	WebsiteURL        string                `json:"websiteUrl"`                             // 机场官网地址
 	CronExpr          string                `json:"cronExpr"`                               // 定时更新Cron表达式
 	Enabled           bool                  `json:"enabled"`                                // 是否启用
 	SuccessCount      int                   `gorm:"default:0" json:"successCount"`          // 成功拉取次数
@@ -156,7 +157,7 @@ func (a *Airport) Add() error {
 func (a *Airport) Update() error {
 	a.normalizeCountryFillSettings()
 	err := database.DB.Model(a).Select(
-		"Name", "URL", "CronExpr", "Enabled", "LastRunTime", "NextRunTime",
+		"Name", "URL", "WebsiteURL", "CronExpr", "Enabled", "LastRunTime", "NextRunTime",
 		"SuccessCount", "Group", "DownloadWithProxy", "ProxyLink", "UserAgent",
 		"RequestHeaders",
 		"FetchUsageInfo", "SkipTLSVerify", "UpdateAfterDetect", "UpdateAfterDetectProfileID", "UpdateAfterDetectChangedOnly", "Remark", "Logo",

@@ -27,6 +27,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import LanIcon from '@mui/icons-material/Lan';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import DownloadIcon from '@mui/icons-material/Download';
+import LanguageIcon from '@mui/icons-material/Language';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import SpeedIcon from '@mui/icons-material/Speed';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
@@ -242,6 +243,31 @@ export default function AirportMobileList({
                         />
                       )}
                     </Stack>
+                    {airport.websiteUrl && (
+                      <Typography
+                        component="a"
+                        href={airport.websiteUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(event) => event.stopPropagation()}
+                        variant="caption"
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 0.35,
+                          mt: 0.5,
+                          color: 'primary.main',
+                          textDecoration: 'none',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          '&:hover': { textDecoration: 'underline' }
+                        }}
+                      >
+                        <LanguageIcon sx={{ fontSize: 13, flexShrink: 0 }} />
+                        {airport.websiteUrl}
+                      </Typography>
+                    )}
                   </Box>
                   <Box
                     sx={{

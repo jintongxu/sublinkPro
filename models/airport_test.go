@@ -123,6 +123,33 @@ func TestAirportUpdatePersistsUpdateAfterDetectSettings(t *testing.T) {
 	}
 }
 
+func TestAirportUpdatePersistsWebsiteURL(t *testing.T) {
+	setupAirportTestDB(t)
+
+	airport := &Airport{
+		Name:       "官网机场",
+		URL:        "https://example.com/subscription",
+		WebsiteURL: "https://example.com",
+		CronExpr:   "0 */12 * * *",
+	}
+	if err := airport.Add(); err != nil {
+		t.Fatalf("add airport: %v", err)
+	}
+
+	airport.WebsiteURL = "https://portal.example.com"
+	if err := airport.Update(); err != nil {
+		t.Fatalf("update airport: %v", err)
+	}
+
+	var stored Airport
+	if err := database.DB.First(&stored, airport.ID).Error; err != nil {
+		t.Fatalf("reload airport: %v", err)
+	}
+	if stored.WebsiteURL != "https://portal.example.com" {
+		t.Fatalf("website URL = %q, want %q", stored.WebsiteURL, "https://portal.example.com")
+	}
+}
+
 func TestAirportBackfillCountryImpliesAutoFillCountryOnSave(t *testing.T) {
 	setupAirportTestDB(t)
 

@@ -28,6 +28,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import LanIcon from '@mui/icons-material/Lan';
 import DownloadIcon from '@mui/icons-material/Download';
+import LanguageIcon from '@mui/icons-material/Language';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import SpeedIcon from '@mui/icons-material/Speed';
@@ -417,6 +418,32 @@ export default function AirportListView({
                             size="small"
                             sx={{ height: 16, fontSize: '0.6rem', mt: 0.2, '& .MuiChip-label': { px: 0.6 } }}
                           />
+                        )}
+                        {airport.websiteUrl && (
+                          <Typography
+                            component="a"
+                            href={airport.websiteUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(event) => event.stopPropagation()}
+                            variant="caption"
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 0.3,
+                              mt: 0.35,
+                              maxWidth: 132,
+                              color: 'primary.main',
+                              textDecoration: 'none',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              '&:hover': { textDecoration: 'underline' }
+                            }}
+                          >
+                            <LanguageIcon sx={{ fontSize: 12, flexShrink: 0 }} />
+                            {airport.websiteUrl}
+                          </Typography>
                         )}
                       </Box>
                     </Box>

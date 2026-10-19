@@ -258,6 +258,7 @@
         "nameRequired": "请输入机场名称",
         "urlRequired": "请输入订阅地址",
         "urlInvalid": "请输入有效的订阅地址",
+        "websiteUrlInvalid": "请输入有效的官网地址",
         "detectProfileRequired": "请先选择更新后检测策略",
         "updateSuccessNeedPull": "更新成功（节点处理配置需重新拉取后生效）",
         "updateSuccess": "更新成功",
@@ -287,12 +288,14 @@
         "name": "名称",
         "logoOptional": "Logo（可选）",
         "subscriptionUrl": "订阅地址",
+        "websiteUrl": "官网地址（可选）",
         "nodeGroup": "节点分组",
         "remark": "备注"
       },
       "helpers": {
         "name": "机场名称不能重复，名称将作为节点来源",
         "subscriptionUrl": "支持 Clash YAML 订阅和 V2Ray Base64 订阅",
+        "websiteUrl": "填写后可在机场卡片中点击打开官网",
         "nodeGroup": "从此机场导入的节点将自动归属到此分组",
         "remark": "一些备注信息，方便你对机场和订阅进行管理",
         "userAgent": "拉取订阅时使用的 User-Agent，可留空"

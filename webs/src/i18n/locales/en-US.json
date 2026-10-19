@@ -258,6 +258,7 @@
         "nameRequired": "Enter an airport name",
         "urlRequired": "Enter a subscription URL",
         "urlInvalid": "Enter a valid subscription URL",
+        "websiteUrlInvalid": "Enter a valid official website URL",
         "detectProfileRequired": "Select a check strategy first",
         "updateSuccessNeedPull": "Updated successfully. Node processing settings require a new pull before they apply.",
         "updateSuccess": "Updated successfully",
@@ -287,12 +288,14 @@
         "name": "Name",
         "logoOptional": "Logo (optional)",
         "subscriptionUrl": "Subscription URL",
+        "websiteUrl": "Official website (optional)",
         "nodeGroup": "Node group",
         "remark": "Remark"
       },
       "helpers": {
         "name": "Airport names must be unique. The name is used as the node source.",
         "subscriptionUrl": "Supports Clash YAML subscriptions and V2Ray Base64 subscriptions",
+        "websiteUrl": "When set, the airport card shows a clickable link to the official website",
         "nodeGroup": "Nodes imported from this airport will automatically belong to this group",
         "remark": "Optional notes to help you manage airports and subscriptions",
         "userAgent": "User-Agent used when pulling subscriptions. Leave blank if not needed."
