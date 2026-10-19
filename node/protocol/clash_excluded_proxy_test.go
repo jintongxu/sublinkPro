@@ -37,8 +37,14 @@ func TestEncodeClashKeepsDialerDefinitionButHidesItFromGroups(t *testing.T) {
 	if !ok || len(groups) != 1 {
 		t.Fatalf("proxy-groups = %#v", config["proxy-groups"])
 	}
-	group := groups[0].(map[string]any)
-	members := group["proxies"].([]any)
+	group, ok := groups[0].(map[string]any)
+	if !ok {
+		t.Fatalf("proxy group type = %T, want map", groups[0])
+	}
+	members, ok := group["proxies"].([]any)
+	if !ok {
+		t.Fatalf("proxy group members type = %T, want []any", group["proxies"])
+	}
 	if len(members) != 1 || members[0] != "target-node" {
 		t.Fatalf("group members = %#v, want only target-node", members)
 	}

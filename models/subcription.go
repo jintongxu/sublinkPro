@@ -25,49 +25,51 @@ func init() {
 }
 
 type Subcription struct {
-	ID                    int
-	Name                  string
-	Config                string    `gorm:"embedded"`
-	Nodes                 []Node    `gorm:"-" json:"-"`
-	SubLogs               []SubLogs `gorm:"foreignKey:SubcriptionID;"` // 一对多关系 约束父表被删除子表记录跟着删除
-	CreateDate            string
-	NodesWithSort         []NodeWithSort    `gorm:"-" json:"Nodes"`
-	Groups                []string          `gorm:"-" json:"-"`      // 内部使用，不返回给前端
-	GroupsWithSort        []GroupWithSort   `gorm:"-" json:"Groups"` // 订阅关联的分组列表（带Sort）
-	AirportsWithSort      []AirportWithSort `gorm:"-" json:"Airports"`
-	Scripts               []Script          `gorm:"-" json:"-"` // 内部使用
-	ScriptsWithSort       []ScriptWithSort  `gorm:"-" json:"Scripts"`
-	IPWhitelist           string            `json:"IPWhitelist"`                               //IP白名单
-	IPBlacklist           string            `json:"IPBlacklist"`                               //IP黑名单
-	DelayTime             int               `json:"DelayTime"`                                 // 最大延迟(ms)
-	MinSpeed              float64           `json:"MinSpeed"`                                  // 最小速度(MB/s)
-	CountryWhitelist      string            `json:"CountryWhitelist"`                          // 国家白名单（逗号分隔）
-	CountryBlacklist      string            `json:"CountryBlacklist"`                          // 国家黑名单（逗号分隔）
-	NodeNameRule          string            `json:"NodeNameRule"`                              // 节点命名规则模板
-	NodeNamePreprocess    string            `json:"NodeNamePreprocess"`                        // 原名预处理规则 (JSON数组)
-	NodeNameWhitelist     string            `json:"NodeNameWhitelist"`                         // 节点名称白名单 (JSON数组)
-	NodeNameBlacklist     string            `json:"NodeNameBlacklist"`                         // 节点名称黑名单 (JSON数组)
-	TagWhitelist          string            `json:"TagWhitelist"`                              // 标签白名单（逗号分隔）
-	TagBlacklist          string            `json:"TagBlacklist"`                              // 标签黑名单（逗号分隔）
-	ProtocolWhitelist     string            `json:"ProtocolWhitelist"`                         // 协议白名单（逗号分隔）
-	ProtocolBlacklist     string            `json:"ProtocolBlacklist"`                         // 协议黑名单（逗号分隔）
-	DeduplicationRule     string            `json:"DeduplicationRule"`                         // 去重规则配置(JSON)
-	RefreshUsageOnRequest bool              `gorm:"default:true" json:"RefreshUsageOnRequest"` // 获取订阅时是否实时刷新用量信息
-	UpdateInterval        int               `gorm:"default:0" json:"UpdateInterval"`           // 订阅客户端更新间隔（小时，0=使用默认值）
-	MaxFraudScore         int               `gorm:"default:0" json:"MaxFraudScore"`            // 最大欺诈评分（0=不限制）
-	OnlyResidential       bool              `gorm:"default:false" json:"OnlyResidential"`      // 仅住宅IP
-	OnlyNative            bool              `gorm:"default:false" json:"OnlyNative"`           // 仅原生IP
-	ResidentialType       string            `json:"ResidentialType"`                           // 住宅属性过滤: residential/datacenter/untested
-	IPType                string            `json:"IPType"`                                    // IP类型过滤: native/broadcast/untested
-	QualityStatus         string            `json:"QualityStatus"`
-	UnlockProvider        string            `json:"UnlockProvider"`
-	UnlockStatus          string            `json:"UnlockStatus"`
-	UnlockKeyword         string            `json:"UnlockKeyword"`
-	UnlockRules           string            `json:"UnlockRules"`
-	UnlockRuleMode        string            `json:"UnlockRuleMode"`
-	CreatedAt             time.Time         `json:"CreatedAt"`
-	UpdatedAt             time.Time         `json:"UpdatedAt"`
-	DeletedAt             gorm.DeletedAt    `gorm:"index" json:"DeletedAt"`
+	ID                      int
+	Name                    string
+	Config                  string    `gorm:"embedded"`
+	Nodes                   []Node    `gorm:"-" json:"-"`
+	SubLogs                 []SubLogs `gorm:"foreignKey:SubcriptionID;"` // 一对多关系 约束父表被删除子表记录跟着删除
+	CreateDate              string
+	NodesWithSort           []NodeWithSort    `gorm:"-" json:"Nodes"`
+	Groups                  []string          `gorm:"-" json:"-"`      // 内部使用，不返回给前端
+	GroupsWithSort          []GroupWithSort   `gorm:"-" json:"Groups"` // 订阅关联的分组列表（带Sort）
+	AirportsWithSort        []AirportWithSort `gorm:"-" json:"Airports"`
+	Scripts                 []Script          `gorm:"-" json:"-"` // 内部使用
+	ScriptsWithSort         []ScriptWithSort  `gorm:"-" json:"Scripts"`
+	NodeTemplateAssignments string            `gorm:"type:text" json:"NodeTemplateAssignments"`  // 节点ID到Clash模板代理组名称的JSON映射
+	ExplicitNodeIDs         string            `gorm:"type:text" json:"ExplicitNodeIDs"`          // 用户显式选择的根节点ID JSON数组
+	IPWhitelist             string            `json:"IPWhitelist"`                               //IP白名单
+	IPBlacklist             string            `json:"IPBlacklist"`                               //IP黑名单
+	DelayTime               int               `json:"DelayTime"`                                 // 最大延迟(ms)
+	MinSpeed                float64           `json:"MinSpeed"`                                  // 最小速度(MB/s)
+	CountryWhitelist        string            `json:"CountryWhitelist"`                          // 国家白名单（逗号分隔）
+	CountryBlacklist        string            `json:"CountryBlacklist"`                          // 国家黑名单（逗号分隔）
+	NodeNameRule            string            `json:"NodeNameRule"`                              // 节点命名规则模板
+	NodeNamePreprocess      string            `json:"NodeNamePreprocess"`                        // 原名预处理规则 (JSON数组)
+	NodeNameWhitelist       string            `json:"NodeNameWhitelist"`                         // 节点名称白名单 (JSON数组)
+	NodeNameBlacklist       string            `json:"NodeNameBlacklist"`                         // 节点名称黑名单 (JSON数组)
+	TagWhitelist            string            `json:"TagWhitelist"`                              // 标签白名单（逗号分隔）
+	TagBlacklist            string            `json:"TagBlacklist"`                              // 标签黑名单（逗号分隔）
+	ProtocolWhitelist       string            `json:"ProtocolWhitelist"`                         // 协议白名单（逗号分隔）
+	ProtocolBlacklist       string            `json:"ProtocolBlacklist"`                         // 协议黑名单（逗号分隔）
+	DeduplicationRule       string            `json:"DeduplicationRule"`                         // 去重规则配置(JSON)
+	RefreshUsageOnRequest   bool              `gorm:"default:true" json:"RefreshUsageOnRequest"` // 获取订阅时是否实时刷新用量信息
+	UpdateInterval          int               `gorm:"default:0" json:"UpdateInterval"`           // 订阅客户端更新间隔（小时，0=使用默认值）
+	MaxFraudScore           int               `gorm:"default:0" json:"MaxFraudScore"`            // 最大欺诈评分（0=不限制）
+	OnlyResidential         bool              `gorm:"default:false" json:"OnlyResidential"`      // 仅住宅IP
+	OnlyNative              bool              `gorm:"default:false" json:"OnlyNative"`           // 仅原生IP
+	ResidentialType         string            `json:"ResidentialType"`                           // 住宅属性过滤: residential/datacenter/untested
+	IPType                  string            `json:"IPType"`                                    // IP类型过滤: native/broadcast/untested
+	QualityStatus           string            `json:"QualityStatus"`
+	UnlockProvider          string            `json:"UnlockProvider"`
+	UnlockStatus            string            `json:"UnlockStatus"`
+	UnlockKeyword           string            `json:"UnlockKeyword"`
+	UnlockRules             string            `json:"UnlockRules"`
+	UnlockRuleMode          string            `json:"UnlockRuleMode"`
+	CreatedAt               time.Time         `json:"CreatedAt"`
+	UpdatedAt               time.Time         `json:"UpdatedAt"`
+	DeletedAt               gorm.DeletedAt    `gorm:"index" json:"DeletedAt"`
 }
 
 type GroupWithSort struct {
@@ -258,37 +260,39 @@ func (sub *Subcription) AddScripts(scriptIDs []int) error {
 // 更新订阅 (Write-Through)
 func (sub *Subcription) Update() error {
 	updates := map[string]any{
-		"name":                     sub.Name,
-		"config":                   sub.Config,
-		"create_date":              sub.CreateDate,
-		"ip_whitelist":             sub.IPWhitelist,
-		"ip_blacklist":             sub.IPBlacklist,
-		"delay_time":               sub.DelayTime,
-		"min_speed":                sub.MinSpeed,
-		"country_whitelist":        sub.CountryWhitelist,
-		"country_blacklist":        sub.CountryBlacklist,
-		"node_name_rule":           sub.NodeNameRule,
-		"node_name_preprocess":     sub.NodeNamePreprocess,
-		"node_name_whitelist":      sub.NodeNameWhitelist,
-		"node_name_blacklist":      sub.NodeNameBlacklist,
-		"tag_whitelist":            sub.TagWhitelist,
-		"tag_blacklist":            sub.TagBlacklist,
-		"protocol_whitelist":       sub.ProtocolWhitelist,
-		"protocol_blacklist":       sub.ProtocolBlacklist,
-		"deduplication_rule":       sub.DeduplicationRule,
-		"refresh_usage_on_request": sub.RefreshUsageOnRequest,
-		"update_interval":          sub.UpdateInterval,
-		"max_fraud_score":          sub.MaxFraudScore,
-		"only_residential":         sub.OnlyResidential,
-		"only_native":              sub.OnlyNative,
-		"residential_type":         sub.ResidentialType,
-		"ip_type":                  sub.IPType,
-		"quality_status":           sub.QualityStatus,
-		"unlock_provider":          sub.UnlockProvider,
-		"unlock_status":            sub.UnlockStatus,
-		"unlock_keyword":           sub.UnlockKeyword,
-		"unlock_rules":             sub.UnlockRules,
-		"unlock_rule_mode":         sub.UnlockRuleMode,
+		"name":                      sub.Name,
+		"config":                    sub.Config,
+		"create_date":               sub.CreateDate,
+		"ip_whitelist":              sub.IPWhitelist,
+		"ip_blacklist":              sub.IPBlacklist,
+		"delay_time":                sub.DelayTime,
+		"min_speed":                 sub.MinSpeed,
+		"country_whitelist":         sub.CountryWhitelist,
+		"country_blacklist":         sub.CountryBlacklist,
+		"node_name_rule":            sub.NodeNameRule,
+		"node_name_preprocess":      sub.NodeNamePreprocess,
+		"node_name_whitelist":       sub.NodeNameWhitelist,
+		"node_name_blacklist":       sub.NodeNameBlacklist,
+		"tag_whitelist":             sub.TagWhitelist,
+		"tag_blacklist":             sub.TagBlacklist,
+		"protocol_whitelist":        sub.ProtocolWhitelist,
+		"protocol_blacklist":        sub.ProtocolBlacklist,
+		"deduplication_rule":        sub.DeduplicationRule,
+		"refresh_usage_on_request":  sub.RefreshUsageOnRequest,
+		"update_interval":           sub.UpdateInterval,
+		"max_fraud_score":           sub.MaxFraudScore,
+		"only_residential":          sub.OnlyResidential,
+		"only_native":               sub.OnlyNative,
+		"residential_type":          sub.ResidentialType,
+		"ip_type":                   sub.IPType,
+		"quality_status":            sub.QualityStatus,
+		"unlock_provider":           sub.UnlockProvider,
+		"unlock_status":             sub.UnlockStatus,
+		"unlock_keyword":            sub.UnlockKeyword,
+		"unlock_rules":              sub.UnlockRules,
+		"unlock_rule_mode":          sub.UnlockRuleMode,
+		"node_template_assignments": sub.NodeTemplateAssignments,
+		"explicit_node_ids":         sub.ExplicitNodeIDs,
 	}
 	err := database.DB.Model(&Subcription{}).Where("id = ? or name = ?", sub.ID, sub.Name).Updates(updates).Error
 	if err != nil {
@@ -1153,26 +1157,28 @@ func (sub *Subcription) Del() error {
 func (sub *Subcription) Copy() (*Subcription, error) {
 	// 创建新订阅对象，复制所有配置字段
 	newSub := &Subcription{
-		Name:                  sub.Name + "_复制",
-		Config:                sub.Config,
-		CreateDate:            time.Now().Format("2006-01-02 15:04:05"),
-		IPWhitelist:           sub.IPWhitelist,
-		IPBlacklist:           sub.IPBlacklist,
-		DelayTime:             sub.DelayTime,
-		MinSpeed:              sub.MinSpeed,
-		CountryWhitelist:      sub.CountryWhitelist,
-		CountryBlacklist:      sub.CountryBlacklist,
-		NodeNameRule:          sub.NodeNameRule,
-		NodeNamePreprocess:    sub.NodeNamePreprocess,
-		NodeNameWhitelist:     sub.NodeNameWhitelist,
-		NodeNameBlacklist:     sub.NodeNameBlacklist,
-		TagWhitelist:          sub.TagWhitelist,
-		TagBlacklist:          sub.TagBlacklist,
-		ProtocolWhitelist:     sub.ProtocolWhitelist,
-		ProtocolBlacklist:     sub.ProtocolBlacklist,
-		DeduplicationRule:     sub.DeduplicationRule,
-		RefreshUsageOnRequest: sub.RefreshUsageOnRequest,
-		UpdateInterval:        sub.UpdateInterval,
+		Name:                    sub.Name + "_复制",
+		Config:                  sub.Config,
+		NodeTemplateAssignments: sub.NodeTemplateAssignments,
+		ExplicitNodeIDs:         sub.ExplicitNodeIDs,
+		CreateDate:              time.Now().Format("2006-01-02 15:04:05"),
+		IPWhitelist:             sub.IPWhitelist,
+		IPBlacklist:             sub.IPBlacklist,
+		DelayTime:               sub.DelayTime,
+		MinSpeed:                sub.MinSpeed,
+		CountryWhitelist:        sub.CountryWhitelist,
+		CountryBlacklist:        sub.CountryBlacklist,
+		NodeNameRule:            sub.NodeNameRule,
+		NodeNamePreprocess:      sub.NodeNamePreprocess,
+		NodeNameWhitelist:       sub.NodeNameWhitelist,
+		NodeNameBlacklist:       sub.NodeNameBlacklist,
+		TagWhitelist:            sub.TagWhitelist,
+		TagBlacklist:            sub.TagBlacklist,
+		ProtocolWhitelist:       sub.ProtocolWhitelist,
+		ProtocolBlacklist:       sub.ProtocolBlacklist,
+		DeduplicationRule:       sub.DeduplicationRule,
+		RefreshUsageOnRequest:   sub.RefreshUsageOnRequest,
+		UpdateInterval:          sub.UpdateInterval,
 	}
 
 	// 使用事务确保数据一致性

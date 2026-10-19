@@ -32,7 +32,8 @@ import {
   sortSubscription,
   batchSortSubscription,
   copySubscription,
-  previewSubscriptionNodes
+  previewSubscriptionNodes,
+  getChainRules
 } from 'api/subscriptions';
 import { getNodeCheckMeta } from 'api/nodeCheck';
 import {
@@ -121,6 +122,8 @@ export default function SubscriptionList() {
     replaceServerWithHost: false,
     selectionMode: 'nodes',
     selectedNodes: [],
+    enableNodeTemplateAssignments: false,
+    nodeTemplateAssignments: {},
     selectedGroups: [],
     selectedAirports: [],
     selectedScripts: [],
@@ -404,14 +407,20 @@ export default function SubscriptionList() {
     try {
       const response = await getSubscriptions({ page: currentPage + 1, pageSize: currentPageSize });
       // 处理分页响应
-      if (response.data && response.data.items !== undefined) {
-        setSubscriptions(response.data.items || []);
-        setTotalItems(response.data.total || 0);
-      } else {
-        // 向后兼容：老格式直接返回数组
-        setSubscriptions(response.data || []);
-        setTotalItems((response.data || []).length);
-      }
+      const items = response.data && response.data.items !== undefined ? response.data.items || [] : response.data || [];
+      const enrichedItems = await Promise.all(
+        items.map(async (sub) => {
+          try {
+            const rulesResponse = await getChainRules(sub.ID);
+            return { ...sub, ChainRules: rulesResponse?.data || [] };
+          } catch (error) {
+            console.warn('加载订阅链式代理规则失败:', sub.ID, error);
+            return { ...sub, ChainRules: [] };
+          }
+        })
+      );
+      setSubscriptions(enrichedItems);
+      setTotalItems(response.data && response.data.items !== undefined ? response.data.total || 0 : enrichedItems.length);
     } catch (error) {
       console.error(error);
       showMessage(error.message || t('subscriptions.page.messages.loadFailed'), 'error');
@@ -583,6 +592,8 @@ export default function SubscriptionList() {
       replaceServerWithHost: false,
       selectionMode: 'nodes',
       selectedNodes: [],
+      enableNodeTemplateAssignments: false,
+      nodeTemplateAssignments: {},
       selectedGroups: [],
       selectedAirports: [],
       selectedScripts: [],
@@ -645,7 +656,15 @@ export default function SubscriptionList() {
 
     const persistedNodes = sub.Nodes || [];
     const nodes = persistedNodes.map((n) => n.ID) || [];
-    const rootNodeIds = deriveExplicitNodeIds(persistedNodes);
+    const rootNodeIds = (() => {
+      try {
+        const parsed = typeof sub.ExplicitNodeIDs === 'string' ? JSON.parse(sub.ExplicitNodeIDs) : sub.ExplicitNodeIDs;
+        const persisted = Array.isArray(parsed) ? parsed.map(Number).filter((id) => Number.isInteger(id) && id > 0) : [];
+        return persisted.length > 0 ? persisted : deriveExplicitNodeIds(persistedNodes);
+      } catch {
+        return deriveExplicitNodeIds(persistedNodes);
+      }
+    })();
     explicitNodeIdsRef.current = rootNodeIds;
     setExplicitNodeIds(rootNodeIds);
     const groups = (sub.Groups || []).map((g) => (typeof g === 'string' ? g : g.Name));
@@ -659,6 +678,27 @@ export default function SubscriptionList() {
     }
 
     const expandedNodeIds = nodes;
+    const parsedNodeTemplateAssignments = (() => {
+      const raw = sub.NodeTemplateAssignments ?? sub.nodeTemplateAssignments ?? sub.NodeTemplates;
+      if (!raw) return {};
+      try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (Array.isArray(parsed)) {
+          return Object.fromEntries(
+            parsed
+              .map((item) => [String(item.nodeId ?? item.NodeID ?? item.id), item.templates ?? item.Templates ?? item.template ?? item.Template ?? []])
+              .map(([nodeId, value]) => [nodeId, Array.isArray(value) ? value : value ? [value] : []])
+              .filter(([, value]) => value.length > 0)
+          );
+        }
+        if (!parsed || typeof parsed !== 'object') return {};
+        return Object.fromEntries(
+          Object.entries(parsed).map(([nodeId, value]) => [nodeId, Array.isArray(value) ? value : value ? [value] : []]).filter(([, value]) => value.length > 0)
+        );
+      } catch {
+        return {};
+      }
+    })();
     setFormData({
       name: sub.Name,
       clash: config?.clash || './template/clash.yaml',
@@ -668,6 +708,9 @@ export default function SubscriptionList() {
       replaceServerWithHost: config?.replaceServerWithHost || false,
       selectionMode: mode,
       selectedNodes: expandedNodeIds,
+      enableNodeTemplateAssignments: config?.nodeTemplateAssignmentsEnabled === true
+         || (config?.nodeTemplateAssignmentsEnabled === undefined && Object.keys(parsedNodeTemplateAssignments).length > 0),
+      nodeTemplateAssignments: parsedNodeTemplateAssignments,
       selectedGroups: groups,
       selectedAirports: airports,
       selectedScripts: scriptIds,
@@ -758,12 +801,20 @@ export default function SubscriptionList() {
     }
 
     try {
+      // 节点选择会异步展开链式前置依赖；保存前必须等待最新选择状态完成。
+      await selectionUpdateQueueRef.current.catch((error) => {
+        console.error('等待节点选择更新失败:', error);
+      });
+      const selectedNodeIdsForSubmit = explicitNodeIdsRef.current.length > 0
+        ? await expandNodeDependencies(explicitNodeIdsRef.current)
+        : formData.selectedNodes;
       const config = JSON.stringify({
         clash: formData.clash,
         surge: formData.surge,
         udp: formData.udp,
         cert: formData.cert,
-        replaceServerWithHost: formData.replaceServerWithHost
+        replaceServerWithHost: formData.replaceServerWithHost,
+        nodeTemplateAssignmentsEnabled: Boolean(formData.enableNodeTemplateAssignments)
       });
 
       const requestData = {
@@ -797,11 +848,24 @@ export default function SubscriptionList() {
         UnlockKeyword: '',
         UnlockRuleMode: formData.UnlockRuleMode || 'or',
         UnlockRules: buildUnlockRulesPayload(formData.unlockRules),
-        RefreshUsageOnRequest: formData.refreshUsageOnRequest
+        RefreshUsageOnRequest: formData.refreshUsageOnRequest,
+        explicitNodeIds: explicitNodeIdsRef.current.join(',')
       };
 
+      const nodeTemplateAssignments = formData.enableNodeTemplateAssignments
+        ? Object.fromEntries(
+            Object.entries(formData.nodeTemplateAssignments || {})
+              .map(([nodeId, groups]) => [nodeId, Array.isArray(groups) ? groups : groups ? [groups] : []])
+              .filter(([nodeId, groups]) => selectedNodeIdsForSubmit.includes(Number(nodeId)) && groups.length > 0)
+          )
+        : {};
+      // On edit, send an explicit empty object so clearing all assignments is persisted.
+      if (isEdit || Object.keys(nodeTemplateAssignments).length > 0) {
+        requestData.nodeTemplateAssignments = JSON.stringify(nodeTemplateAssignments);
+      }
+
       if (formData.selectionMode === 'nodes') {
-        requestData.nodeIds = formData.selectedNodes.join(',');
+        requestData.nodeIds = selectedNodeIdsForSubmit.join(',');
         requestData.groups = '';
         requestData.airports = '';
       } else if (formData.selectionMode === 'groups') {
@@ -809,7 +873,7 @@ export default function SubscriptionList() {
         requestData.groups = formData.selectedGroups.join(',');
         requestData.airports = formData.selectedAirports.join(',');
       } else {
-        requestData.nodeIds = formData.selectedNodes.join(',');
+        requestData.nodeIds = selectedNodeIdsForSubmit.join(',');
         requestData.groups = formData.selectedGroups.join(',');
         requestData.airports = formData.selectedAirports.join(',');
       }
@@ -1408,6 +1472,7 @@ export default function SubscriptionList() {
         isEdit={isEdit}
         formData={formData}
         setFormData={setFormData}
+        chainRules={currentSub?.ChainRules || []}
         templates={templates}
         scripts={scripts}
         selectorNodes={availableNodes}

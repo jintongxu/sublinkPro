@@ -19,6 +19,7 @@ import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Radio from '@mui/material/Radio';
 import RadioGroup from '@mui/material/RadioGroup';
+import Switch from '@mui/material/Switch';
 import Typography from '@mui/material/Typography';
 import Autocomplete from '@mui/material/Autocomplete';
 import Tooltip from '@mui/material/Tooltip';
@@ -29,6 +30,7 @@ import Accordion from '@mui/material/Accordion';
 import AccordionSummary from '@mui/material/AccordionSummary';
 import AccordionDetails from '@mui/material/AccordionDetails';
 import Chip from '@mui/material/Chip';
+import Popover from '@mui/material/Popover';
 
 // icons
 import BuildIcon from '@mui/icons-material/Build';
@@ -42,6 +44,7 @@ import SecurityIcon from '@mui/icons-material/Security';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import SearchIcon from '@mui/icons-material/Search';
 
 import NodeRenameBuilder from './NodeRenameBuilder';
 import { previewSubscriptionNodeName } from './nodeRenameRuleUtils';
@@ -90,6 +93,7 @@ export default function SubscriptionFormDialog({
   isEdit,
   formData,
   setFormData,
+  chainRules = [],
   templates,
   scripts,
   selectorNodes,
@@ -146,6 +150,13 @@ export default function SubscriptionFormDialog({
   const [countryWhitelistInput, setCountryWhitelistInput] = useState('');
   const [countryBlacklistInput, setCountryBlacklistInput] = useState('');
 
+  const [assignmentMenuGroup, setAssignmentMenuGroup] = useState(null);
+  const [assignmentMenuAnchor, setAssignmentMenuAnchor] = useState(null);
+  const [assignmentDraftNodeIds, setAssignmentDraftNodeIds] = useState([]);
+  const [assignmentNodeSearch, setAssignmentNodeSearch] = useState('');
+  const [assignmentNodeGroupFilter, setAssignmentNodeGroupFilter] = useState('all');
+  const [assignmentNodeSourceFilter, setAssignmentNodeSourceFilter] = useState('all');
+
   const [expandedPanels, setExpandedPanels] = useState({
     basic: true,
     nodes: true,
@@ -170,6 +181,192 @@ export default function SubscriptionFormDialog({
   const surgeTemplates = useMemo(() => {
     return templates.filter((t) => t.category === 'surge');
   }, [templates]);
+
+  const selectedClashTemplate = useMemo(() => {
+    const selectedPath = formData.clash || '';
+    const selectedFile = selectedPath.split(/[\\/]/).pop();
+    return clashTemplates.find((template) => {
+      const file = template.file || template.File || template.filename || template.name || template.Name;
+      return file === selectedFile;
+    }) || clashTemplates[0];
+  }, [clashTemplates, formData.clash]);
+
+  const clashProxyGroupMetadata = useMemo(() => {
+    const content = selectedClashTemplate?.text || selectedClashTemplate?.Text || '';
+    const groups = [];
+    const lines = content.split(/\r?\n/);
+    let inProxyGroups = false;
+    let sectionIndent = -1;
+    let currentGroup = null;
+    const flushGroup = () => {
+      if (currentGroup?.name && currentGroup.type !== 'relay' && !groups.some((group) => group.name === currentGroup.name)) {
+        const references = Object.entries(currentGroup.references)
+          .filter(([, value]) => value !== undefined && value !== '')
+          .map(([key, value]) => `${key}${value === true ? '' : `=${value}`}`);
+        groups.push({ ...currentGroup, references });
+      }
+      currentGroup = null;
+    };
+    for (const line of lines) {
+      if (!line.trim() || line.trimStart().startsWith('#')) continue;
+      const indent = line.match(/^\s*/)?.[0].length || 0;
+      if (!inProxyGroups) {
+        if (/^\s*proxy-groups\s*:/.test(line)) {
+          inProxyGroups = true;
+          sectionIndent = indent;
+        }
+        continue;
+      }
+      if (indent <= sectionIndent && !/^\s*-/.test(line)) {
+        flushGroup();
+        break;
+      }
+      const nameMatch = line.match(/^\s*-\s+name\s*:\s*(.*?)\s*$/);
+      if (nameMatch) {
+        flushGroup();
+        currentGroup = { name: nameMatch[1].trim().replace(/^(['"])(.*)\1$/, '$2').trim(), type: '', references: {} };
+        continue;
+      }
+      if (!currentGroup) continue;
+      const typeMatch = line.match(/^\s+type\s*:\s*(.*?)\s*$/);
+      if (typeMatch) {
+        currentGroup.type = typeMatch[1].trim().replace(/^(['"])(.*)\1$/, '$2').trim();
+        continue;
+      }
+      const referenceMatch = line.match(/^\s+(include-all(?:-proxies|-providers)?|use|filter|exclude-filter|exclude-type)\s*:\s*(.*?)\s*$/);
+      if (referenceMatch) {
+        const [, key, rawValue] = referenceMatch;
+        const value = rawValue.trim().replace(/^(['"])(.*)\1$/, '$2');
+        currentGroup.references[key] = value || true;
+      }
+    }
+    flushGroup();
+    return groups;
+  }, [selectedClashTemplate]);
+
+  const clashProxyGroupOptions = useMemo(
+    () => clashProxyGroupMetadata.map((group) => group.name),
+    [clashProxyGroupMetadata]
+  );
+
+  const chainProxyGroupTargets = useMemo(() => {
+    const targets = new Map();
+    const nodeNames = new Map((selectedNodesList || []).map((node) => [Number(node.ID), node.Name || node.EffectiveName || `节点 #${node.ID}`]));
+    const addTarget = (groupName, target) => {
+      if (!groupName || !target) return;
+      const values = targets.get(groupName) || new Set();
+      values.add(target);
+      targets.set(groupName, values);
+    };
+    chainRules.filter((rule) => rule.enabled !== false).forEach((rule) => {
+      try {
+        const chain = typeof rule.chainConfig === 'string' ? JSON.parse(rule.chainConfig) : rule.chainConfig;
+        const target = typeof rule.targetConfig === 'string' ? JSON.parse(rule.targetConfig) : rule.targetConfig;
+        const sourceGroups = (Array.isArray(chain) ? chain : [])
+          .filter((item) => item?.type === 'template_group' && item.groupName)
+          .map((item) => item.groupName);
+        const targetText = target?.type === 'template_group'
+          ? target.groupName
+          : target?.nodeId
+            ? nodeNames.get(Number(target.nodeId)) || `节点 #${target.nodeId}`
+            : target?.nodeIds?.length
+              ? target.nodeIds.map((id) => nodeNames.get(Number(id)) || `节点 #${id}`).join('、')
+              : target?.type || '目标';
+        sourceGroups.forEach((groupName) => addTarget(groupName, targetText));
+      } catch {
+        // Ignore malformed legacy rules; the chain dialog remains the source of truth.
+      }
+    });
+    return targets;
+  }, [chainRules, selectedNodesList]);
+
+  const chainTargetNodeGroups = useMemo(() => {
+    const groupsByNode = new Map();
+    chainRules.filter((rule) => rule.enabled !== false).forEach((rule) => {
+      try {
+        const chain = typeof rule.chainConfig === 'string' ? JSON.parse(rule.chainConfig) : rule.chainConfig;
+        const target = typeof rule.targetConfig === 'string' ? JSON.parse(rule.targetConfig) : rule.targetConfig;
+        const sourceGroups = (Array.isArray(chain) ? chain : [])
+          .filter((item) => item?.type === 'template_group' && item.groupName)
+          .map((item) => item.groupName);
+        const targetIds = target?.type === 'specified_node' && target.nodeId
+          ? [target.nodeId]
+          : target?.type === 'specified_nodes' && Array.isArray(target.nodeIds)
+            ? target.nodeIds
+            : [];
+        targetIds.forEach((nodeId) => {
+          const values = groupsByNode.get(Number(nodeId)) || new Set();
+          sourceGroups.forEach((groupName) => values.add(groupName));
+          groupsByNode.set(Number(nodeId), values);
+        });
+      } catch {
+        // Ignore malformed legacy rules.
+      }
+    });
+    return groupsByNode;
+  }, [chainRules]);
+
+  const assignmentCandidateNodes = useMemo(() => {
+    const seen = new Set();
+    return (selectedNodesList || []).filter((node) => {
+      const id = Number(node.ID);
+      if (!Number.isInteger(id) || id <= 0 || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }, [selectedNodesList]);
+
+  const assignmentNodeGroupOptions = useMemo(
+    () => Array.from(new Set(assignmentCandidateNodes.map((node) => String(node.Group || '')).filter(Boolean))).sort(),
+    [assignmentCandidateNodes]
+  );
+  const assignmentNodeSourceOptions = useMemo(
+    () => Array.from(new Set(assignmentCandidateNodes.map((node) => String(node.Source || '')).filter(Boolean))).sort(),
+    [assignmentCandidateNodes]
+  );
+
+  const assignmentFilteredNodes = useMemo(() => {
+    const keyword = assignmentNodeSearch.trim().toLowerCase();
+    return assignmentCandidateNodes.filter((node) => {
+      if (assignmentNodeGroupFilter !== 'all' && String(node.Group || '') !== assignmentNodeGroupFilter) return false;
+      if (assignmentNodeSourceFilter !== 'all' && String(node.Source || '') !== assignmentNodeSourceFilter) return false;
+      if (!keyword) return true;
+      return [node.Name, node.EffectiveName, node.LinkName, node.Group, node.Source]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(keyword));
+    });
+  }, [assignmentCandidateNodes, assignmentNodeGroupFilter, assignmentNodeSearch, assignmentNodeSourceFilter]);
+
+  const assignedNodeIdsForGroup = (groupName) =>
+    assignmentCandidateNodes
+      .filter((node) => (formData.nodeTemplateAssignments?.[String(node.ID)] || []).includes(groupName))
+      .map((node) => Number(node.ID));
+
+  const closeAssignmentMenu = () => {
+    setAssignmentMenuGroup(null);
+    setAssignmentMenuAnchor(null);
+    setAssignmentNodeSearch('');
+    setAssignmentNodeGroupFilter('all');
+    setAssignmentNodeSourceFilter('all');
+  };
+
+  const applyGroupAssignmentDraft = () => {
+    if (!assignmentMenuGroup) return;
+    const selected = new Set(assignmentDraftNodeIds.map(Number));
+    setFormData((prev) => {
+      const next = { ...(prev.nodeTemplateAssignments || {}) };
+      assignmentCandidateNodes.forEach((node) => {
+        const nodeId = String(node.ID);
+        const groups = Array.isArray(next[nodeId]) ? next[nodeId] : next[nodeId] ? [next[nodeId]] : [];
+        const withoutCurrentGroup = groups.filter((name) => name !== assignmentMenuGroup);
+        if (selected.has(Number(node.ID))) withoutCurrentGroup.push(assignmentMenuGroup);
+        if (withoutCurrentGroup.length > 0) next[nodeId] = Array.from(new Set(withoutCurrentGroup));
+        else delete next[nodeId];
+      });
+      return { ...prev, nodeTemplateAssignments: next };
+    });
+    closeAssignmentMenu();
+  };
 
   const unlockProviderOptions = getUnlockProviderOptions();
   const unlockRenameVariables = getUnlockRenameVariables();
@@ -735,6 +932,7 @@ export default function SubscriptionFormDialog({
                       availableNodes={availableNodes}
                       selectedNodes={formData.selectedNodes}
                       selectedNodesList={selectedNodesList}
+                      chainTargetNodeGroups={chainTargetNodeGroups}
                       checkedAvailable={checkedAvailable}
                       checkedSelected={checkedSelected}
                       selectedNodeSearch={selectedNodeSearch}
@@ -759,6 +957,253 @@ export default function SubscriptionFormDialog({
                       <Alert severity="info" variant="outlined" sx={{ mt: 1 }}>
                         {selectorLoadingText}
                       </Alert>
+                    )}
+                    {assignmentCandidateNodes.length > 0 && (
+                      <Box sx={helperPanelSx}>
+                        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+                          <Box>
+                            <Typography variant="subtitle2">自定义代理组节点分配</Typography>
+                            <Typography variant="caption" sx={{ color: secondaryText }}>
+                              新添加节点默认加入全部代理组，可按需取消；关闭时完全使用 Clash 模板原有的代理组规则。
+                            </Typography>
+                          </Box>
+                          <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
+                            {formData.enableNodeTemplateAssignments && Object.keys(formData.nodeTemplateAssignments || {}).length > 0 && (
+                              <Button
+                                size="small"
+                                color="inherit"
+                                onClick={() => {
+                                  closeAssignmentMenu();
+                                  setFormData((prev) => ({ ...prev, nodeTemplateAssignments: {} }));
+                                }}
+                              >
+                                清空全部分配
+                              </Button>
+                            )}
+                            <FormControlLabel
+                              control={
+                                <Switch
+                                  checked={Boolean(formData.enableNodeTemplateAssignments)}
+                                  onChange={(event) => {
+                                    closeAssignmentMenu();
+                                    setFormData((prev) => ({
+                                      ...prev,
+                                      enableNodeTemplateAssignments: event.target.checked,
+                                      nodeTemplateAssignments: event.target.checked
+                                        ? assignNewNodesToAllGroups(
+                                            prev.nodeTemplateAssignments || {}, [],
+                                            assignmentCandidateNodes.map((node) => node.ID), clashProxyGroupOptions
+                                          )
+                                        : prev.nodeTemplateAssignments
+                                    }));
+                                  }}
+                                />
+                              }
+                              label={formData.enableNodeTemplateAssignments ? '已启用' : '使用默认'}
+                              labelPlacement="start"
+                              sx={{ m: 0 }}
+                            />
+                          </Stack>
+                        </Stack>
+                        {!formData.enableNodeTemplateAssignments && (
+                          <Alert severity="info" variant="outlined" sx={{ mt: 1.25, py: 0.25 }}>
+                            当前使用原来的生成方式：节点按模板的 include-all、筛选器和占位符规则自动进入代理组。
+                          </Alert>
+                        )}
+                        {formData.enableNodeTemplateAssignments && (
+                          <Alert severity="info" variant="outlined" sx={{ my: 1.5, py: 0.25 }}>
+                          新增节点不会自动加入代理组，需要时可在下方按代理组手动选择。已有节点的分配保持不变，自动展开的前置依赖由链式代理管理。
+                          {Math.max(0, formData.selectedNodes.length - assignmentCandidateNodes.length) > 0 &&
+                            ` 当前有 ${formData.selectedNodes.length - assignmentCandidateNodes.length} 个前置依赖不会出现在候选列表中。`}
+                          </Alert>
+                        )}
+                        {formData.enableNodeTemplateAssignments && (
+                        <Stack spacing={1}>
+                          {clashProxyGroupMetadata.map((group) => {
+                            const groupName = group.name;
+                            const assignedNodeIds = assignedNodeIdsForGroup(groupName);
+                            return (
+                              <Stack
+                                key={groupName}
+                                direction={{ xs: 'column', sm: 'row' }}
+                                spacing={1}
+                                alignItems={{ sm: 'center' }}
+                                sx={{ p: 1.25, border: '1px solid', borderColor: panelBorder, borderRadius: 1.5, bgcolor: mutedPanelSurface }}
+                              >
+                                <Box sx={{ flex: 1, minWidth: 0 }}>
+                                  <Typography variant="body2" noWrap sx={{ color: primaryText, fontWeight: 500 }}>
+                                    {groupName}
+                                    {chainProxyGroupTargets.has(groupName) && (
+                                      <Chip size="small" color="warning" variant="outlined" label={`链式前置 → ${Array.from(chainProxyGroupTargets.get(groupName)).join('、')}`} sx={{ ml: 0.75, verticalAlign: 'middle' }} />
+                                    )}
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ color: tertiaryText, display: 'block' }}>
+                                    直接分配 {assignedNodeIds.length} / {assignmentCandidateNodes.length} 个节点
+                                  </Typography>
+                                </Box>
+                                <Stack direction="row" spacing={1} alignItems="center">
+                                  {assignedNodeIds.length > 0 && <Chip size="small" color="primary" variant="outlined" label={assignedNodeIds.length} />}
+                                  <Button
+                                    size="small"
+                                    variant={assignedNodeIds.length > 0 ? 'contained' : 'outlined'}
+                                    onClick={(event) => {
+                                      setAssignmentMenuGroup(groupName);
+                                      setAssignmentDraftNodeIds(assignedNodeIds);
+                                      setAssignmentNodeSearch('');
+                                      setAssignmentNodeGroupFilter('all');
+                                      setAssignmentNodeSourceFilter('all');
+                                      setAssignmentMenuAnchor(event.currentTarget);
+                                    }}
+                                  >
+                                    选择节点
+                                  </Button>
+                                </Stack>
+                              </Stack>
+                            );
+                          })}
+                        </Stack>
+                        )}
+                        <Popover
+                          open={Boolean(formData.enableNodeTemplateAssignments && assignmentMenuGroup && assignmentMenuAnchor)}
+                          anchorEl={assignmentMenuAnchor}
+                          onClose={closeAssignmentMenu}
+                          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                          transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                          slotProps={{
+                            paper: {
+                              sx: {
+                                mt: 0.75,
+                                width: { xs: 360, sm: 520 },
+                                maxWidth: 'calc(100vw - 32px)',
+                                borderRadius: 2,
+                                border: '1px solid',
+                                borderColor: panelBorder,
+                                boxShadow: theme.shadows[12],
+                                overflow: 'hidden'
+                              }
+                            }
+                          }}
+                        >
+                          <Box sx={{ px: 2, py: 1.5, borderBottom: '1px solid', borderColor: panelBorder }}>
+                            <Typography variant="subtitle2" noWrap>{assignmentMenuGroup}</Typography>
+                            <Typography variant="caption" sx={{ color: secondaryText }}>
+                              已选择 {assignmentDraftNodeIds.length} 个节点；节点可以同时属于多个代理组
+                            </Typography>
+                            <TextField
+                              size="small"
+                              fullWidth
+                              placeholder="搜索节点、分组或来源"
+                              value={assignmentNodeSearch}
+                              onChange={(event) => setAssignmentNodeSearch(event.target.value)}
+                              sx={{ mt: 1.25 }}
+                              slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> } }}
+                            />
+                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
+                              <FormControl size="small" fullWidth>
+                                <InputLabel>节点分组</InputLabel>
+                                <Select
+                                  value={assignmentNodeGroupFilter}
+                                  label="节点分组"
+                                  onChange={(event) => setAssignmentNodeGroupFilter(event.target.value)}
+                                >
+                                  <MenuItem value="all">全部分组</MenuItem>
+                                  {assignmentNodeGroupOptions.map((group) => (
+                                    <MenuItem key={group} value={group}>{group}</MenuItem>
+                                  ))}
+                                </Select>
+                              </FormControl>
+                              <FormControl size="small" fullWidth>
+                                <InputLabel>节点来源</InputLabel>
+                                <Select
+                                  value={assignmentNodeSourceFilter}
+                                  label="节点来源"
+                                  onChange={(event) => setAssignmentNodeSourceFilter(event.target.value)}
+                                >
+                                  <MenuItem value="all">全部来源</MenuItem>
+                                  {assignmentNodeSourceOptions.map((source) => (
+                                    <MenuItem key={source} value={source}>{source}</MenuItem>
+                                  ))}
+                                </Select>
+                              </FormControl>
+                            </Stack>
+                            <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
+                              <Typography variant="caption" sx={{ color: secondaryText, flex: 1 }}>
+                                当前显示 {assignmentFilteredNodes.length} / {assignmentCandidateNodes.length} 个节点
+                              </Typography>
+                              <Button
+                                size="small"
+                                onClick={() =>
+                                  setAssignmentDraftNodeIds((current) =>
+                                    Array.from(new Set([...current, ...assignmentFilteredNodes.map((node) => Number(node.ID))]))
+                                  )
+                                }
+                              >
+                                全选当前结果
+                              </Button>
+                              <Button size="small" color="inherit" onClick={() => setAssignmentDraftNodeIds([])}>
+                                清空
+                              </Button>
+                            </Stack>
+                          </Box>
+                          <Box
+                            sx={{
+                              maxHeight: 'min(52vh, 420px)',
+                              overflowY: 'auto',
+                              scrollbarWidth: 'thin',
+                              scrollbarColor: `${withAlpha(palette.text.primary, 0.28)} transparent`,
+                              '&::-webkit-scrollbar': { width: 7 },
+                              '&::-webkit-scrollbar-track': { backgroundColor: 'transparent', margin: '8px 0' },
+                              '&::-webkit-scrollbar-thumb': {
+                                backgroundColor: withAlpha(palette.text.primary, 0.24),
+                                borderRadius: 999,
+                                border: '2px solid transparent',
+                                backgroundClip: 'content-box'
+                              }
+                            }}
+                          >
+                            {assignmentFilteredNodes.map((node) => {
+                              const nodeId = Number(node.ID);
+                              const checked = assignmentDraftNodeIds.includes(nodeId);
+                              return (
+                                <MenuItem
+                                  key={nodeId}
+                                  selected={checked}
+                                  onClick={() =>
+                                    setAssignmentDraftNodeIds((current) =>
+                                      current.includes(nodeId) ? current.filter((id) => id !== nodeId) : [...current, nodeId]
+                                    )
+                                  }
+                                  sx={{ minHeight: 52, py: 0.75 }}
+                                >
+                                  <Checkbox checked={checked} sx={{ p: 0.75, mr: 1 }} />
+                                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                                    <Typography variant="body2" noWrap>{node.Name || node.EffectiveName || `Node #${nodeId}`}</Typography>
+                                    <Stack direction="row" spacing={0.75} alignItems="center">
+                                      {node.Group && <Typography variant="caption" sx={{ color: tertiaryText }}>{node.Group}</Typography>}
+                                      {node.DialerProxyName && <Chip size="small" variant="outlined" color="warning" label={`经前置：${node.DialerProxyName}`} />}
+                                      {chainTargetNodeGroups.has(nodeId) && (
+                                        <Chip
+                                          size="small"
+                                          variant="outlined"
+                                          color="info"
+                                          label={`链式落地 · 前置组：${Array.from(chainTargetNodeGroups.get(nodeId)).join('、')}`}
+                                        />
+                                      )}
+                                    </Stack>
+                                  </Box>
+                                </MenuItem>
+                              );
+                            })}
+                            {assignmentFilteredNodes.length === 0 && (
+                              <Typography variant="body2" sx={{ p: 3, textAlign: 'center', color: secondaryText }}>没有匹配的节点</Typography>
+                            )}
+                          </Box>
+                          <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ px: 2, py: 1.25, borderTop: '1px solid', borderColor: panelBorder, bgcolor: mutedPanelSurface }}>
+                            <Button size="small" onClick={closeAssignmentMenu}>取消</Button>
+                            <Button size="small" variant="contained" onClick={applyGroupAssignmentDraft}>完成</Button>
+                          </Stack>
+                        </Popover>
+                      </Box>
                     )}
                   </>
                 )}
