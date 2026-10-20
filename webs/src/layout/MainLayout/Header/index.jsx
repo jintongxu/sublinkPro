@@ -8,14 +8,10 @@ import Box from '@mui/material/Box';
 import LogoSection from '../LogoSection';
 import ProfileSection from './ProfileSection';
 import NotificationSection from './NotificationSection';
-import DonationSection from './DonationSection';
-import SkillDownloadSection from './SkillDownloadSection';
 import ThemeModeSection from './ThemeModeSection';
 import LanguageSection from './LanguageSection';
 import useResolvedColorScheme from 'hooks/useResolvedColorScheme';
 import { getHeaderTriggerTokens } from './headerPopoverTokens';
-import { donationConfig } from 'config/donation';
-
 import { handlerDrawerOpen, useGetMenuMaster } from 'api/menu';
 
 // assets
@@ -30,17 +26,11 @@ export default function Header() {
 
   const { menuMaster } = useGetMenuMaster();
   const drawerOpen = menuMaster.isDashboardDrawerOpened;
-  const sidebarAccent = theme.palette[donationConfig.headerIconColor].main;
-  const { triggerColor, triggerSurface, triggerBorder, activeSurface, activeBorder } = getHeaderTriggerTokens(
-    theme,
-    isDark,
-    sidebarAccent,
-    {
-      lightSurfaceAlpha: 0.12,
-      lightHoverAlpha: 0.22,
-      activeColor: sidebarAccent
-    }
-  );
+  const { triggerColor, triggerSurface, triggerBorder, activeSurface, activeBorder } = getHeaderTriggerTokens(theme, isDark, theme.palette.primary.main, {
+    lightSurfaceAlpha: 0.12,
+    lightHoverAlpha: 0.22,
+    activeColor: theme.palette.primary.main
+  });
   const MenuToggleIcon = drawerOpen ? IconLayoutSidebarLeftCollapse : IconLayoutSidebarLeftExpand;
 
   return (
@@ -75,14 +65,6 @@ export default function Header() {
 
       {/* spacer */}
       <Box sx={{ flexGrow: 1 }} />
-
-      {/* donation */}
-      <DonationSection />
-
-      {/* AI skill download - desktop only */}
-      <Box sx={{ display: { xs: 'none', md: 'block' } }}>
-        <SkillDownloadSection />
-      </Box>
 
       {/* notification */}
       <NotificationSection />

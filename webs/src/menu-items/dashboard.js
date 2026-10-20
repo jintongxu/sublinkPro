@@ -1,5 +1,5 @@
 // assets
-import { IconDashboard, IconWorldLatitude } from '@tabler/icons-react';
+import { IconDashboard } from '@tabler/icons-react';
 
 // ==============================|| DASHBOARD MENU ITEMS ||============================== //
 
@@ -18,15 +18,6 @@ const dashboard = {
       icon: IconDashboard,
       breadcrumbs: false
     },
-    {
-      id: 'node-map',
-      title: 'Node Map',
-      titleKey: 'navigation.items.nodeMap',
-      type: 'item',
-      url: '/dashboard/map',
-      icon: IconWorldLatitude,
-      breadcrumbs: false
-    }
   ]
 };
 

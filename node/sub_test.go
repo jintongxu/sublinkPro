@@ -666,6 +666,41 @@ func TestExpandClashProxyProvidersReturnsProviderErrorWhenNoNodesParsed(t *testi
 	}
 }
 
+func TestParseSubscriptionPayloadSupportsClashYAMLAndBase64(t *testing.T) {
+	const clashYAML = `proxies:
+  - name: hkt-home
+    type: trojan
+    server: hkt.example.com
+    port: 443
+    password: secret
+    sni: hkt.example.com
+    dialer-proxy: front-node
+`
+
+	yamlURLs, err := ParseSubscriptionPayload([]byte(clashYAML))
+	if err != nil {
+		t.Fatalf("parse Clash YAML subscription: %v", err)
+	}
+	if len(yamlURLs) != 1 || !strings.HasPrefix(yamlURLs[0].Url, "trojan://") {
+		t.Fatalf("parsed YAML URLs = %#v, want one trojan URL", yamlURLs)
+	}
+	if yamlURLs[0].DialerProxyName != "front-node" {
+		t.Fatalf("dialer-proxy = %q, want front-node", yamlURLs[0].DialerProxyName)
+	}
+
+	plainLink := GenerateProxyLink(protocol.Proxy{
+		Name: "base64-node", Type: "trojan", Server: "base64.example.com", Port: 443, Password: "secret",
+	})
+	encoded := base64.StdEncoding.EncodeToString([]byte(plainLink + "\n"))
+	base64URLs, err := ParseSubscriptionPayload([]byte(encoded))
+	if err != nil {
+		t.Fatalf("parse Base64 subscription: %v", err)
+	}
+	if len(base64URLs) != 1 || !strings.HasPrefix(base64URLs[0].Url, "trojan://") {
+		t.Fatalf("parsed Base64 URLs = %#v, want one trojan URL", base64URLs)
+	}
+}
+
 func TestParseClashProviderPayloadSupportsPlainAndBase64Links(t *testing.T) {
 	link := GenerateProxyLink(protocol.Proxy{
 		Name:     "plain-provider-node",

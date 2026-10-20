@@ -143,12 +143,12 @@ Base: `/api/v1/nodes`
 ### Add Node
 **POST** `/nodes/add` — **form**
 - **Required:** `link` (proxy URI, WireGuard config text, or Clash YAML containing `proxies:`)
-- Optional: `name`, `nameMode` (`link` = use upstream name, `remark` = use custom `name`; `custom` is accepted as an alias of `remark`), `dialerProxyName`, `group`
+- Optional: `name`, `nameMode` (`link` = use upstream name, `remark` = use custom `name`; `custom` is accepted as an alias of `remark`), `remark` (independent note for the whole node, such as source/purpose), `dialerProxyName`, `group`
 
 ### Update Node
 **POST** `/nodes/update` — **form**
 - Located by `oldlink` (and/or `oldname`), NOT by id.
-- Fields: `oldname`, `oldlink`, `link` (required, the new/confirmed link), `name`, `nameMode`, `dialerProxyName`, `group`, `tags`
+- Fields: `oldname`, `oldlink`, `link` (required, the new/confirmed link), `name`, `nameMode`, `remark` (independent whole-node note), `dialerProxyName`, `group`, `tags`
 
 ### Delete Node
 **DELETE** `/nodes/delete` (query: `?id=123`)

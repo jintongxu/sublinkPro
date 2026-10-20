@@ -75,6 +75,7 @@ func TestNodeUpdateAllowsChangingDialerForSameLink(t *testing.T) {
 	}
 
 	form := url.Values{
+		"remark":             {"来源备注测试"},
 		"oldname":            {first.Name},
 		"oldlink":            {link},
 		"oldDialerProxyName": {first.DialerProxyName},
@@ -99,6 +100,9 @@ func TestNodeUpdateAllowsChangingDialerForSameLink(t *testing.T) {
 	}
 	if stored.DialerProxyName != "front-c" {
 		t.Fatalf("dialer proxy = %q, want front-c", stored.DialerProxyName)
+	}
+	if stored.Remark != "来源备注测试" {
+		t.Fatalf("remark = %q, want 来源备注测试", stored.Remark)
 	}
 }
 

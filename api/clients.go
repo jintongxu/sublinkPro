@@ -785,14 +785,17 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 			}
 			defer func() { _ = resp.Body.Close() }()
 			body, _ := io.ReadAll(resp.Body)
-			nodes := utils.Base64Decode(string(body))
-			links := strings.Split(nodes, "\n")
-			for _, link := range links {
-				urls = append(urls, protocol.Urls{
-					Url:             link,
-					DialerProxyName: dialerProxy,
-					ProxyGroups:     nodeTemplateAssignments[v.ID],
-				})
+			remoteURLs, parseErr := node.ParseSubscriptionPayload(body)
+			if parseErr != nil {
+				utils.Error("远程订阅解析失败: %v", parseErr)
+				continue
+			}
+			for _, remoteURL := range remoteURLs {
+				if dialerProxy != "" {
+					remoteURL.DialerProxyName = dialerProxy
+				}
+				remoteURL.ProxyGroups = nodeTemplateAssignments[v.ID]
+				urls = append(urls, remoteURL)
 			}
 		// 默认
 		default:

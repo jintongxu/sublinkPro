@@ -830,6 +830,51 @@ func TestGetClientHeadRequestUsesRequestScopedSubscriptionName(t *testing.T) {
 	}
 }
 
+func TestBuildPreparedMihomoYAMLExpandsRemoteClashSubscription(t *testing.T) {
+	setupClientsAPITestDB(t)
+	templatePath := writeTestClashTemplate(t)
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/yaml")
+		_, _ = w.Write([]byte(`proxies:
+  - name: hkt-home
+    type: trojan
+    server: hkt.example.com
+    port: 443
+    password: secret
+    sni: hkt.example.com
+`))
+	}))
+	defer remote.Close()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(recorder)
+	ginContext.Request = httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/c/?client=clash", nil)
+	bridge, _, ok := buildPreparedMihomoYAML(ginContext, preparedClientResponse{
+		ClientType: "clash",
+		Mode:       clientResponseNormal,
+		SubName:    "remote-yaml-sub",
+		Subscription: models.Subcription{
+			Name:                  "remote-yaml-sub",
+			Config:                `{"clash":"` + filepath.ToSlash(templatePath) + `"}`,
+			RefreshUsageOnRequest: false,
+			Nodes: []models.Node{{
+				ID:       1,
+				Name:     "remote-source",
+				LinkName: "remote-source",
+				Link:     remote.URL + "/subscription",
+			}},
+		},
+	})
+	if !ok {
+		t.Fatal("build prepared Mihomo YAML failed")
+	}
+	names := clashProxyNamesFromBody(t, bridge.Body)
+	if len(names) != 1 || names[0] != "hkt-home" {
+		t.Fatalf("remote YAML proxy names = %v, want [hkt-home]", names)
+	}
+}
+
 func TestRenderPreparedClashSetsProfileUpdateIntervalHeader(t *testing.T) {
 	setupClientsAPITestDB(t)
 	clashTemplatePath := writeTestClashTemplate(t)

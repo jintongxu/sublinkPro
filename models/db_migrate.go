@@ -387,6 +387,12 @@ func RunMigrations() error {
 		utils.Error("执行迁移 0038_allow_node_dialer_variants 失败: %v", err)
 	}
 
+	if err := database.RunCustomMigration("0039_add_node_remark", func() error {
+		return db.AutoMigrate(&Node{})
+	}); err != nil {
+		utils.Error("执行迁移 0039_add_node_remark 失败: %v", err)
+	}
+
 	if err := database.RunCustomMigration("0024_migrate_legacy_webhook_settings", func() error {
 		legacyURL, _ := GetSetting("webhook_url")
 		legacyMethod, _ := GetSetting("webhook_method")

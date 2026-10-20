@@ -27,6 +27,7 @@ type Node struct {
 	ClashExtra         string `gorm:"type:text" json:"-"` // 仅供 Clash/Mihomo 导出恢复的未知节点属性
 	LinkHash           string `gorm:"size:64;uniqueIndex:idx_nodes_link_hash_dialer" json:"-"`
 	Name               string //系统内节点备注名称
+	Remark             string `json:"Remark"` //节点整体备注（来源、用途等），不参与出站名称
 	LinkName           string //节点原始名称
 	NameMode           string `gorm:"size:16;default:'link'"` // 节点出站名称模式：link=使用原始名称，remark=使用备注名称
 	EffectiveNameValue string `gorm:"-" json:"-"`             // 节点实际出站名称，仅用于运行时响应/脚本上下文
@@ -516,13 +517,14 @@ func (node *Node) Update() error {
 	node.syncLinkHash()
 	node.UpdatedAt = time.Now()
 	// Write-Through: 先写数据库
-	err := database.DB.Model(node).Select("Name", "NameMode", "Link", "ClashExtra", "LinkHash", "DialerProxyName", "Group", "LinkName", "LinkAddress", "LinkHost", "LinkPort", "LinkCountry", "Protocol", "ContentHash", "UpdatedAt").Updates(node).Error
+	err := database.DB.Model(node).Select("Name", "Remark", "NameMode", "Link", "ClashExtra", "LinkHash", "DialerProxyName", "Group", "LinkName", "LinkAddress", "LinkHost", "LinkPort", "LinkCountry", "Protocol", "ContentHash", "UpdatedAt").Updates(node).Error
 	if err != nil {
 		return err
 	}
 	// 更新缓存：获取完整节点后更新
 	if cachedNode, ok := nodeCache.Get(node.ID); ok {
 		cachedNode.Name = node.Name
+		cachedNode.Remark = node.Remark
 		cachedNode.NameMode = node.NameMode
 		cachedNode.Link = node.Link
 		cachedNode.ClashExtra = node.ClashExtra

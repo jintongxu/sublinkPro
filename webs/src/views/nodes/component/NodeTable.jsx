@@ -36,16 +36,26 @@ import NodeProtocolChip from './NodeProtocolChip';
 // utils
 import {
   formatDateTime,
-  getCountryDisplay,
   getDelayDisplay,
-  getFraudScoreDisplay,
-  getIpTypeDisplay,
-  getNodeUnlockSummaryDisplay,
-  getQualityStatusDisplay,
-  getResidentialDisplay,
   getSpeedDisplay
 } from '../utils';
-import { getNodeTagChipSx, getNodeThemeTokens } from '../nodeTheme';
+import { getNodeThemeTokens } from '../nodeTheme';
+
+const getNodeTableFlexSx = () => ({
+  display: 'flex',
+  alignItems: 'stretch',
+  '& > *': { minWidth: 0, width: 'auto !important', maxWidth: 'none !important', boxSizing: 'border-box' },
+  '& > :nth-of-type(1)': { order: 1, flex: '0 0 48px' },
+  '& > :nth-of-type(2)': { order: 2, flex: '1.6 1 0' },
+  '& > :nth-of-type(3)': { order: 6, flex: '1.4 1 0' },
+  '& > :nth-of-type(4)': { order: 7, flex: '0.8 1 0' },
+  '& > :nth-of-type(5)': { order: 3, flex: '1 1 0' },
+  '& > :nth-of-type(6)': { order: 4, flex: '1 1 0' },
+  '& > :nth-of-type(7)': { order: 5, flex: '1.8 1 0' },
+  '& > :nth-of-type(8)': { order: 8, flex: '1 1 0' },
+  '& > :nth-of-type(9)': { order: 9, flex: '1 1 0' },
+  '& > :nth-of-type(10)': { order: 10, flex: '1.2 1 0' }
+});
 
 /**
  * 桌面端节点表格（精简版）
@@ -76,7 +86,6 @@ export default function NodeTable({
   const { isDark } = useResolvedColorScheme();
   const tokens = getNodeThemeTokens(theme, isDark);
   const isSelected = (node) => selectedNodes.some((n) => n.ID === node.ID);
-  const actionColumnSurface = tokens.palette.background.paper;
   const rowHoverSurface = tokens.isDark ? tokens.palette.dark.dark : tokens.palette.grey[50];
   const rowSelectedSurface = tokens.isDark ? tokens.palette.dark.main : tokens.palette.primary.light;
   const rowSelectedHoverSurface = rowSelectedSurface;
@@ -214,12 +223,6 @@ export default function NodeTable({
     '&:hover': {
       bgcolor: selected ? rowSelectedHoverSurface : rowHoverSurface
     },
-    '& .MuiTableCell-root.actions-cell': {
-      backgroundColor: selected ? rowSelectedSurface : actionColumnSurface
-    },
-    '&:hover .MuiTableCell-root.actions-cell': {
-      backgroundColor: selected ? rowSelectedHoverSurface : rowHoverSurface
-    },
     '& td, & .MuiTableCell-root': {
       borderBottomColor: tokens.softBorder
     }
@@ -277,15 +280,6 @@ export default function NodeTable({
               overflow: 'hidden',
               textOverflow: 'ellipsis'
             },
-            '& .MuiTableCell-root.actions-cell': {
-              overflow: 'visible',
-              position: 'sticky',
-              right: 0,
-              bgcolor: actionColumnSurface,
-              backgroundImage: 'none',
-              zIndex: 1,
-              boxShadow: `-2px 0 4px ${alpha(tokens.isDark ? theme.palette.common.black : theme.palette.common.black, 0.08)}`
-            },
             '& .MuiTableCell-paddingCheckbox': { px: 0.5, py: 0.5, verticalAlign: 'middle', width: 48 },
             '& .MuiTableCell-paddingCheckbox .MuiCheckbox-root': { p: 0.5, display: 'flex', alignItems: 'center' },
             '& .MuiChip-root': { height: 22 },
@@ -304,21 +298,35 @@ export default function NodeTable({
               }
             }}
           >
-            <TableRow>
+            <TableRow sx={getNodeTableFlexSx()}>
               <TableCell padding="checkbox" sx={{ position: 'relative' }} />
+              <TableCell
+                sx={{
+                  width: columnWidths.name,
+                  maxWidth: columnWidths.name,
+                  minWidth: 60,
+                  position: 'relative',
+                  bgcolor: resizing?.columnKey === 'name' ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
+                  transition: 'background-color 0.15s ease'
+                }}
+              >
+                <TableSortLabel active={sortBy === 'name'} direction={sortBy === 'name' ? sortOrder : 'asc'} onClick={() => onSort('name')}>
+                  {t('nodes.table.name')}
+                </TableSortLabel>
+                <ResizeHandle columnKey="name" />
+              </TableCell>
               <TableCell
                 sx={{
                   width: columnWidths.remark,
                   maxWidth: columnWidths.remark,
                   minWidth: 60,
+                  whiteSpace: 'nowrap',
                   position: 'relative',
                   bgcolor: resizing?.columnKey === 'remark' ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
                   transition: 'background-color 0.15s ease'
                 }}
               >
-                <TableSortLabel active={sortBy === 'name'} direction={sortBy === 'name' ? sortOrder : 'asc'} onClick={() => onSort('name')}>
-                  {t('nodes.table.remark')}
-                </TableSortLabel>
+                {t('nodes.table.remark')}
                 <ResizeHandle columnKey="remark" />
               </TableCell>
               <TableCell
@@ -391,38 +399,6 @@ export default function NodeTable({
               </TableCell>
               <TableCell
                 sx={{
-                  width: columnWidths.tags,
-                  minWidth: 60,
-                  whiteSpace: 'nowrap',
-                  position: 'relative',
-                  bgcolor: resizing?.columnKey === 'tags' ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
-                  transition: 'background-color 0.15s ease'
-                }}
-              >
-                {t('nodes.table.tags')}
-                <ResizeHandle columnKey="tags" />
-              </TableCell>
-              <TableCell
-                sx={{
-                  width: columnWidths.country,
-                  minWidth: 60,
-                  whiteSpace: 'nowrap',
-                  position: 'relative',
-                  bgcolor: resizing?.columnKey === 'country' ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
-                  transition: 'background-color 0.15s ease'
-                }}
-              >
-                <TableSortLabel
-                  active={sortBy === 'country'}
-                  direction={sortBy === 'country' ? sortOrder : 'asc'}
-                  onClick={() => onSort('country')}
-                >
-                  {t('nodes.table.country')}
-                </TableSortLabel>
-                <ResizeHandle columnKey="country" />
-              </TableCell>
-              <TableCell
-                sx={{
                   width: columnWidths.delay,
                   minWidth: 60,
                   position: 'relative',
@@ -459,20 +435,7 @@ export default function NodeTable({
                 </TableSortLabel>
                 <ResizeHandle columnKey="speed" />
               </TableCell>
-              <TableCell
-                sx={{
-                  width: columnWidths.ipFeatures,
-                  minWidth: 60,
-                  whiteSpace: 'nowrap',
-                  position: 'relative',
-                  bgcolor: resizing?.columnKey === 'ipFeatures' ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
-                  transition: 'background-color 0.15s ease'
-                }}
-              >
-                {t('nodes.table.ipFeatures')}
-                <ResizeHandle columnKey="ipFeatures" />
-              </TableCell>
-              <TableCell align="right" className="actions-cell" sx={{ width: 140, minWidth: 140, pr: 0.5 }}>
+              <TableCell className="actions-cell" sx={{ pr: 0.5 }}>
                 {t('nodes.table.actions')}
               </TableCell>
             </TableRow>
@@ -488,7 +451,7 @@ export default function NodeTable({
                   key={node.ID}
                   hover
                   selected={isSelected(node)}
-                  sx={getTableRowSx(isSelected(node))}
+                  sx={{ ...getTableRowSx(isSelected(node)), ...getNodeTableFlexSx() }}
                   onClick={(e) => {
                     // 点击复选框或操作按钮时不触发详情
                     if (e.target.closest('button') || e.target.closest('input[type="checkbox"]')) return;
@@ -500,8 +463,8 @@ export default function NodeTable({
                   </TableCell>
                   <TableCell
                     sx={{
-                      width: columnWidths.remark,
-                      maxWidth: columnWidths.remark
+                      width: columnWidths.name,
+                      maxWidth: columnWidths.name
                     }}
                   >
                     <Tooltip title={effectiveName}>
@@ -536,6 +499,23 @@ export default function NodeTable({
                         )}
                       </Stack>
                     </Tooltip>
+                  </TableCell>
+                  <TableCell
+                    sx={{
+                      width: columnWidths.remark,
+                      maxWidth: columnWidths.remark,
+                      whiteSpace: 'normal'
+                    }}
+                  >
+                    {node.Remark ? (
+                      <Tooltip title={node.Remark}>
+                        <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {node.Remark}
+                        </Typography>
+                      </Tooltip>
+                    ) : (
+                      <Typography variant="caption" color="text.secondary">-</Typography>
+                    )}
                   </TableCell>
                   <TableCell>
                     <NodeProtocolChip link={node.Link} protocolMeta={protocolMeta} maxWidth="100%" />
@@ -635,43 +615,6 @@ export default function NodeTable({
                     })()}
                   </TableCell>
                   <TableCell>
-                    {node.Tags ? (
-                      <Box sx={{ display: 'flex', gap: 0.375, flexWrap: 'wrap', width: '100%' }}>
-                        {node.Tags.split(',')
-                          .filter((t) => t.trim())
-                          .map((tag, idx) => {
-                            const tagName = tag.trim();
-                            const tagColor = tagColorMap?.[tagName] || tokens.palette.primary.main;
-                            return (
-                              <Chip
-                                key={idx}
-                                label={tagName}
-                                size="small"
-                                sx={{ fontSize: '10px', height: 18, ...getNodeTagChipSx(theme, tokens, tagColor) }}
-                              />
-                            );
-                          })}
-                      </Box>
-                    ) : (
-                      <Typography variant="caption" color="text.secondary">
-                        -
-                      </Typography>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {(() => {
-                      const countryDisplay = getCountryDisplay(node.LinkCountry, { unknownLabel: t('common.unknown') });
-                      return (
-                        <Chip
-                          label={countryDisplay.text}
-                          color={countryDisplay.isUnknown ? 'default' : 'secondary'}
-                          variant="outlined"
-                          size="small"
-                        />
-                      );
-                    })()}
-                  </TableCell>
-                  <TableCell>
                     <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0, alignItems: 'flex-start' }}>
                       {(() => {
                         const d = getDelayDisplay(node.DelayTime, node.DelayStatus);
@@ -721,7 +664,7 @@ export default function NodeTable({
                       )}
                     </Box>
                   </TableCell>
-                  <TableCell>
+                  {false && <TableCell>
                     {(() => {
                       const ipTypeDisplay = getIpTypeDisplay(node.IsBroadcast, node.QualityStatus, node.QualityFamily);
                       const residentialDisplay = getResidentialDisplay(node.IsResidential, node.QualityStatus, node.QualityFamily);
@@ -849,8 +792,8 @@ export default function NodeTable({
                         </Box>
                       );
                     })()}
-                  </TableCell>
-                  <TableCell align="right" className="actions-cell">
+                  </TableCell>}
+                  <TableCell className="actions-cell">
                     <Tooltip title={t('nodes.table.speedTest')}>
                       <IconButton size="small" onClick={() => onSpeedTest(node)}>
                         <SpeedIcon fontSize="small" />

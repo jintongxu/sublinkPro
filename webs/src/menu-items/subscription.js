@@ -11,7 +11,6 @@ import {
   IconWorld,
   IconPlane,
   IconFlag,
-  IconRefreshDot,
   IconGitBranch
 } from '@tabler/icons-react';
 
@@ -204,22 +203,4 @@ const system = {
   ]
 };
 
-const changelog = {
-  id: 'changelog-group',
-  title: 'Changelog',
-  titleKey: 'navigation.groups.changelog',
-  type: 'group',
-  children: [
-    {
-      id: 'changelog',
-      title: 'Changelog',
-      titleKey: 'navigation.items.changelog',
-      type: 'item',
-      url: '/system/updates',
-      icon: IconRefreshDot,
-      breadcrumbs: true
-    }
-  ]
-};
-
-export { subscription, script, accesskey, system, changelog };
+export { subscription, script, accesskey, system };

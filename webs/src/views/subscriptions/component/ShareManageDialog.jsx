@@ -149,18 +149,30 @@ export default function ShareManageDialog({ open, subscription, onClose, showMes
   const dialogContentRef = useRef(null);
 
   const getServerUrl = useCallback(() => {
-    if (systemDomainConfig) {
-      return systemDomainConfig.replace(/\/+$/, '');
+    const configuredDomain = systemDomainConfig?.trim();
+    if (configuredDomain) {
+      const domain = /^https?:\/\//i.test(configuredDomain) ? configuredDomain : `http://${configuredDomain}`;
+      return domain.replace(/\/+$/, '');
     }
 
-    // 开发环境前端由 Vite 运行在 3100，订阅接口实际由后端 8000 提供。
-    // 优先使用 API 配置的 origin，避免把前端开发端口写入分享链接。
+    // In production, the page origin is the public address. Do not use the
+    // build-time VITE_API_URL here because it commonly points to localhost.
+    if (!import.meta.env.DEV) {
+      return window.location.origin;
+    }
+
+    // During local Vite development, the backend usually runs on port 8000.
     const apiUrl = import.meta.env.VITE_API_URL;
     if (apiUrl) {
       try {
-        return new URL(apiUrl, window.location.origin).origin;
+        const apiOrigin = new URL(apiUrl, window.location.origin);
+        const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+        if (loopbackHosts.has(apiOrigin.hostname) && window.location.hostname) {
+          apiOrigin.hostname = window.location.hostname;
+        }
+        return apiOrigin.origin;
       } catch {
-        // 非法配置时回退到当前页面 origin。
+        // Invalid development configuration: use the current page origin.
       }
     }
 
@@ -170,10 +182,9 @@ export default function ShareManageDialog({ open, subscription, onClose, showMes
   const fetchSystemDomain = async () => {
     try {
       const res = await getSystemDomain();
-      if (res.data?.systemDomain) {
-        setSystemDomainConfig(res.data.systemDomain);
-      }
+      setSystemDomainConfig(res.data?.systemDomain?.trim() || '');
     } catch (error) {
+      setSystemDomainConfig('');
       console.error('Failed to get system domain config:', error);
     }
   };

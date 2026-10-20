@@ -1798,6 +1798,9 @@
         "linkPlaceholder": "支持输入：各类代理链接（vmess://、vless://、wireguard:// 等）、WireGuard 标准配置文件（包含 [Interface] 和 [Peer]）、Clash YAML 配置（包含 proxies 字段）、Base64 订阅链接。多行使用回车分隔",
         "remarkName": "备注名称",
         "remarkNameHelper": "自定义备注会保存在 Name 字段，不会被机场更新覆盖。",
+        "remark": "节点备注",
+        "remarkPlaceholder": "例如：来源、用途、账号说明",
+        "remarkHelper": "独立于节点名称，仅用于记录这个节点的备注信息。",
         "nameMode": "实际使用名称",
         "nameModeHelper": "控制订阅输出、重命名规则、脚本和链式代理使用哪个名称。",
         "nameModeLink": "使用原始名称",
@@ -1941,6 +1944,7 @@
       },
       "labels": {
         "source": "来源",
+        "remark": "节点备注",
         "dialerProxy": "前置代理",
         "referencedBy": "引用关系",
         "tags": "标签",
@@ -2294,6 +2298,7 @@
       }
     },
     "table": {
+      "name": "节点名",
       "remark": "备注",
       "protocol": "协议",
       "group": "分组",
@@ -2301,11 +2306,8 @@
       "dialerProxy": "前置",
       "dialerProxyUsage": "使用：{{name}}",
       "referencedBy": "引用：{{names}}",
-      "tags": "标签",
-      "country": "国家",
       "delay": "延迟",
       "speed": "速度",
-      "ipFeatures": "IP特征",
       "actions": "操作",
       "originalName": "原始：{{name}}",
       "remarkName": "备注：{{name}}",

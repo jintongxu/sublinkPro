@@ -77,16 +77,14 @@ import { buildUnlockRulesPayload, setUnlockMeta, SPEED_TEST_TCP_OPTIONS, SPEED_T
 // 列宽默认配置
 const DEFAULT_COLUMN_WIDTHS = {
   checkbox: 48,
+  name: 180,
   remark: 180,
   protocol: 92,
   group: 120,
   source: 120,
   dialerProxy: 220,
-  tags: 120,
-  country: 80,
   delay: 130,
   speed: 130,
-  ipFeatures: 240,
   actions: 140
 };
 
@@ -166,6 +164,7 @@ export default function NodeList() {
   const [currentNode, setCurrentNode] = useState(null);
   const [nodeForm, setNodeForm] = useState({
     name: '',
+    remark: '',
     nameMode: 'link',
     link: '',
     dialerProxyName: '',
@@ -715,7 +714,7 @@ export default function NodeList() {
   const handleAddNode = () => {
     setIsEditNode(false);
     setCurrentNode(null);
-    setNodeForm({ name: '', nameMode: 'link', link: '', dialerProxyName: '', group: '', mergeMode: '2', tags: [] });
+    setNodeForm({ name: '', remark: '', nameMode: 'link', link: '', dialerProxyName: '', group: '', mergeMode: '2', tags: [] });
     setNodeDialogOpen(true);
   };
 
@@ -735,6 +734,7 @@ export default function NodeList() {
     }
     setNodeForm({
       name: node.Name,
+      remark: node.Remark || '',
       nameMode: node.NameMode || 'link',
       link: node.Link?.split(',').join('\n') || '',
       dialerProxyName: node.DialerProxyName || '',
@@ -1037,6 +1037,7 @@ export default function NodeList() {
           oldDialerProxyName: currentNode.DialerProxyName || '',
           link: processedLink,
           name: nodeForm.name.trim(),
+          remark: nodeForm.remark.trim(),
           nameMode: nodeForm.nameMode || 'link',
           dialerProxyName: nodeForm.dialerProxyName.trim(),
           group: nodeForm.group.trim(),
@@ -1053,6 +1054,7 @@ export default function NodeList() {
             const res = await addNodes({
               link,
               name: nodeLinks.length === 1 ? nodeForm.name.trim() : '',
+              remark: nodeForm.remark.trim(),
               nameMode: nodeLinks.length === 1 && nodeForm.name.trim() ? 'remark' : nodeForm.nameMode || 'link',
               dialerProxyName: nodeForm.dialerProxyName.trim(),
               group: nodeForm.group.trim(),

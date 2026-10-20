@@ -56,27 +56,6 @@ export default function NodeDialog({
       </DialogTitle>
       <DialogContent dividers sx={{ bgcolor: 'transparent', borderColor: tokens.panelBorder }}>
         <Stack spacing={2} sx={{ mt: 1 }}>
-          {!isEdit && (
-            <TextField
-              fullWidth
-              label={t('nodes.dialog.fields.remarkName', '节点名称')}
-              value={nodeForm.name}
-              onChange={(e) => setNodeForm({ ...nodeForm, name: e.target.value })}
-              placeholder={t('nodes.dialog.fields.remarkNamePlaceholder', '留空则使用节点原名称')}
-              helperText={t('nodes.dialog.fields.remarkNameAddHelper', '添加单个节点时可自定义名称；留空使用链接中的名称')}
-              sx={fieldControlSx}
-            />
-          )}
-          <TextField
-            fullWidth
-            multiline
-            rows={4}
-            label={t('nodes.dialog.fields.link')}
-            value={nodeForm.link}
-            onChange={(e) => setNodeForm({ ...nodeForm, link: e.target.value })}
-            placeholder={t('nodes.dialog.fields.linkPlaceholder')}
-            sx={fieldControlSx}
-          />
           {isEdit && (
             <Stack spacing={1.5}>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
@@ -107,6 +86,36 @@ export default function NodeDialog({
               </Typography>
             </Stack>
           )}
+          {!isEdit && (
+            <TextField
+              fullWidth
+              label={t('nodes.dialog.fields.remarkName', '节点名称')}
+              value={nodeForm.name}
+              onChange={(e) => setNodeForm({ ...nodeForm, name: e.target.value })}
+              placeholder={t('nodes.dialog.fields.remarkNamePlaceholder', '留空则使用节点原名称')}
+              helperText={t('nodes.dialog.fields.remarkNameAddHelper', '添加单个节点时可自定义名称；留空使用链接中的名称')}
+              sx={fieldControlSx}
+            />
+          )}
+          <TextField
+            fullWidth
+            multiline
+            rows={4}
+            label={t('nodes.dialog.fields.link')}
+            value={nodeForm.link}
+            onChange={(e) => setNodeForm({ ...nodeForm, link: e.target.value })}
+            placeholder={t('nodes.dialog.fields.linkPlaceholder')}
+            sx={fieldControlSx}
+          />
+          <TextField
+            fullWidth
+            label={t('nodes.dialog.fields.remark')}
+            value={nodeForm.remark || ''}
+            onChange={(e) => setNodeForm({ ...nodeForm, remark: e.target.value })}
+            placeholder={t('nodes.dialog.fields.remarkPlaceholder')}
+            helperText={t('nodes.dialog.fields.remarkHelper')}
+            sx={fieldControlSx}
+          />
           <SearchableNodeSelect
             nodes={proxyNodeOptions}
             loading={loadingProxyNodes}
@@ -208,6 +217,7 @@ NodeDialog.propTypes = {
   isEdit: PropTypes.bool.isRequired,
   nodeForm: PropTypes.shape({
     name: PropTypes.string,
+    remark: PropTypes.string,
     nameMode: PropTypes.string,
     link: PropTypes.string,
     dialerProxyName: PropTypes.string,

@@ -1798,6 +1798,9 @@
         "linkPlaceholder": "Supports proxy links such as vmess://, vless://, wireguard://, WireGuard standard configuration files containing [Interface] and [Peer], Clash YAML configuration containing proxies, and Base64 subscription links. Use new lines for multiple entries.",
         "remarkName": "Remark name",
         "remarkNameHelper": "Custom remarks are saved in the Name field and will not be overwritten by airport updates.",
+        "remark": "Node remark",
+        "remarkPlaceholder": "For example: source, purpose, account notes",
+        "remarkHelper": "Separate from the node name; used only for notes about this node.",
         "nameMode": "Effective name",
         "nameModeHelper": "Controls which name subscription output, rename rules, scripts, and chain proxy use.",
         "nameModeLink": "Use original name",
@@ -1941,6 +1944,7 @@
       },
       "labels": {
         "source": "Source",
+        "remark": "Node remark",
         "dialerProxy": "Dialer proxy",
         "referencedBy": "References",
         "tags": "Tags",
@@ -2294,6 +2298,7 @@
       }
     },
     "table": {
+      "name": "Node name",
       "remark": "Remark",
       "protocol": "Protocol",
       "group": "Group",
@@ -2301,11 +2306,8 @@
       "dialerProxy": "Dialer proxy",
       "dialerProxyUsage": "Uses: {{name}}",
       "referencedBy": "Referenced by: {{names}}",
-      "tags": "Tags",
-      "country": "Country",
       "delay": "Delay",
       "speed": "Speed",
-      "ipFeatures": "IP Features",
       "actions": "Actions",
       "originalName": "Original: {{name}}",
       "remarkName": "Remark: {{name}}",

@@ -456,6 +456,37 @@ func parseClashProviderPayload(data []byte) ([]protocol.Proxy, error) {
 	return nil, fmt.Errorf("未找到节点")
 }
 
+// ParseSubscriptionPayload parses a remote subscription response into links
+// suitable for client conversion. It accepts Clash/Mihomo YAML as well as
+// Base64 or plain-text protocol links.
+func ParseSubscriptionPayload(data []byte) ([]protocol.Urls, error) {
+	proxies, err := parseClashProviderPayload(data)
+	if err != nil {
+		return nil, err
+	}
+
+	urls := make([]protocol.Urls, 0, len(proxies))
+	for _, proxy := range proxies {
+		link := GenerateProxyLink(proxy)
+		if strings.TrimSpace(link) == "" {
+			continue
+		}
+		clashExtra, extraErr := protocol.EncodeClashExtra(proxy)
+		if extraErr != nil {
+			utils.Warn("远程订阅节点 %q 的 Clash 扩展字段解析失败: %v", proxy.Name, extraErr)
+		}
+		urls = append(urls, protocol.Urls{
+			Url:             link,
+			DialerProxyName: proxy.Dialer_proxy,
+			ClashExtra:      clashExtra,
+		})
+	}
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("远程订阅未找到可用节点")
+	}
+	return urls, nil
+}
+
 func parseSubscriptionLinkProxies(data []byte) []protocol.Proxy {
 	decodedBytes, errB64 := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
 	if errB64 != nil {

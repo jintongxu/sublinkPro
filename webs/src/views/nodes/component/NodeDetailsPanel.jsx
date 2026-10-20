@@ -35,6 +35,7 @@ import FilterVintageIcon from '@mui/icons-material/FilterVintage';
 import VpnLockIcon from '@mui/icons-material/VpnLock';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
+import NotesIcon from '@mui/icons-material/Notes';
 
 // dialog
 import Dialog from '@mui/material/Dialog';
@@ -438,6 +439,9 @@ export default function NodeDetailsPanel({
             label={t('nodes.details.labels.source')}
             value={node.Source === 'manual' ? t('nodes.details.values.manualAdd') : node.Source}
           />
+          {node.Remark && (
+            <DetailItem icon={<NotesIcon fontSize="small" />} label={t('nodes.details.labels.remark')} value={node.Remark} />
+          )}
           {node.DialerProxyName && (
             <DetailItem
               icon={<LinkIcon fontSize="small" />}

@@ -232,6 +232,7 @@ func NodeUpdadte(c *gin.Context) {
 		nameMode, hasNameMode = c.GetPostForm("NameMode")
 	}
 	dialerProxyName := c.PostForm("dialerProxyName")
+	remark := strings.TrimSpace(c.PostForm("remark"))
 	oldDialerProxyName, hasOldDialerProxyName := c.GetPostForm("oldDialerProxyName")
 	if !hasOldDialerProxyName {
 		oldDialerProxyName = ""
@@ -282,6 +283,7 @@ func NodeUpdadte(c *gin.Context) {
 		return
 	}
 	Node.Name = name
+	Node.Remark = remark
 	if strings.TrimSpace(Node.Name) == "" {
 		Node.Name = identity.Name
 	}
@@ -490,6 +492,7 @@ func NodeAdd(c *gin.Context) {
 	}
 	nameMode := models.NormalizeNodeNameMode(nameModeInput)
 	dialerProxyName := strings.TrimSpace(c.PostForm("dialerProxyName"))
+	remark := strings.TrimSpace(c.PostForm("remark"))
 	group := c.PostForm("group")
 	if link == "" {
 		utils.FailWithMsg(c, "link  不能为空")
@@ -532,6 +535,7 @@ func NodeAdd(c *gin.Context) {
 				// 创建节点并添加；Clash YAML 中的备注由系统生成，重复时自动追加编号。
 				var n models.Node
 				n.Name = models.GenerateUniqueNodeName(proxy.Name, 0, nil)
+				n.Remark = remark
 				n.NameMode = models.NodeNameModeLink
 				n.Link = proxyLink
 				n.ClashExtra = clashExtra
@@ -580,6 +584,7 @@ func NodeAdd(c *gin.Context) {
 		return
 	}
 	Node.Name = name
+	Node.Remark = remark
 	Node.NameMode = nameMode
 	identity, err := protocol.ExtractLinkIdentity(link)
 	if err != nil {
