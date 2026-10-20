@@ -14,7 +14,8 @@ main `SKILL.md`.
 
 ## Defaults & key facts
 
-- **Image:** `zerodeng/sublink-pro` (stable) or `zerodeng/sublink-pro:dev` (dev/preview builds).
+- **Image:** `zerodeng/sublink-pro:latest` (stable) or `zerodeng/sublink-pro:dev` (dev/preview builds).
+- **Version pinning:** production can use a release tag such as `zerodeng/sublink-pro:v1.2.3`; every branch build also publishes a commit-specific tag for traceability.
 - **Port:** `8000` (web UI + API).
 - **Default login:** `admin` / `123456` — tell the user to change it immediately.
 - **Data directories** (persist across upgrades; removing them is destructive):

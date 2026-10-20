@@ -157,6 +157,8 @@ docker-compose up -d
 docker image prune -f
 ```
 
+For production, you can pin a specific release tag such as `zerodeng/sublink-pro:v1.2.3`. The `latest` tag tracks the newest stable build, while branch builds also retain a commit-specific tag for traceability.
+
 ### 🐳 Manual Docker update
 
 ```bash

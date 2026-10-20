@@ -229,9 +229,22 @@ Production builds generate:
 
 ### Docker Images
 
-Released images:
-- `zerodeng/sublink-pro:latest`
-- `zerodeng/sublink-pro:v{version}`
+Docker releases push both a traceable version tag and a rolling tag:
+
+- Git tag (for example, `v1.2.3`):
+  - `zerodeng/sublink-pro:v1.2.3`
+  - `zerodeng/sublink-pro:latest`
+- `main` branch:
+  - `zerodeng/sublink-pro:main-{short commit SHA}`
+  - `zerodeng/sublink-pro:latest`
+- `dev` branch:
+  - `zerodeng/sublink-pro:dev-{short commit SHA}`
+  - `zerodeng/sublink-pro:dev`
+- Other branches:
+  - `zerodeng/sublink-pro:{branch name}-{short commit SHA}`
+  - `zerodeng/sublink-pro:{branch name}`
+
+Every build therefore retains an immutable tag containing a release version or commit SHA instead of only overwriting `latest`. Use a specific version tag in production; use `latest` to follow the newest stable release.
 
 ---
 

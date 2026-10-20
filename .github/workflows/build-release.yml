@@ -375,16 +375,29 @@ jobs:
               -t zerodeng/sublink-pro:latest \
               --push .
           else
-            # 分支推送：dev 和 main 分支统一使用 dev 标签，其他分支使用分支名
+            # 分支推送：main 生成版本标签 + latest，dev 和其他分支生成带短 SHA 的可追溯标签
             BRANCH=${GITHUB_REF#refs/heads/}
-            if [[ "$BRANCH" == "dev" || "$BRANCH" == "main" ]]; then
-              DOCKER_TAG="dev"
+            SAFE_BRANCH=${BRANCH//\//-}
+            SHORT_SHA=$(git rev-parse --short=12 HEAD)
+            if [[ "$BRANCH" == "main" ]]; then
+              DOCKER_TAG="main-${SHORT_SHA}"
+              docker buildx build --no-cache --pull --platform linux/amd64,linux/arm64,linux/arm/v7,linux/386 \
+                -f Dockerfile.ci \
+                -t zerodeng/sublink-pro:${DOCKER_TAG} \
+                -t zerodeng/sublink-pro:latest \
+                --push .
             else
-              # 将分支名中的 / 替换为 - 以兼容 Docker tag 格式
-              DOCKER_TAG=${BRANCH//\//-}
+              if [[ "$BRANCH" == "dev" ]]; then
+                DOCKER_TAG="dev-${SHORT_SHA}"
+                ROLLING_TAG="dev"
+              else
+                DOCKER_TAG="${SAFE_BRANCH}-${SHORT_SHA}"
+                ROLLING_TAG="${SAFE_BRANCH}"
+              fi
+              docker buildx build --no-cache --pull --platform linux/amd64,linux/arm64,linux/arm/v7,linux/386 \
+                -f Dockerfile.ci \
+                -t zerodeng/sublink-pro:${DOCKER_TAG} \
+                -t zerodeng/sublink-pro:${ROLLING_TAG} \
+                --push .
             fi
-            docker buildx build --no-cache --pull --platform linux/amd64,linux/arm64,linux/arm/v7,linux/386 \
-              -f Dockerfile.ci \
-              -t zerodeng/sublink-pro:${DOCKER_TAG} \
-              --push .
           fi

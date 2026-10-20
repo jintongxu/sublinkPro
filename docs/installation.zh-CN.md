@@ -156,6 +156,8 @@ docker-compose up -d
 docker image prune -f
 ```
 
+生产环境可以固定使用具体版本标签，例如 `zerodeng/sublink-pro:v1.2.3`。`latest` 始终指向最新稳定构建，分支构建也会保留带 commit SHA 的版本标签，便于追溯。
+
 ### 🐳 Docker 手动更新
 
 ```bash

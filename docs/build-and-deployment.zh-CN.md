@@ -229,9 +229,22 @@ docker-compose up -d
 
 ### Docker 镜像
 
-发布的镜像：
-- `zerodeng/sublink-pro:latest`
-- `zerodeng/sublink-pro:v{version}`
+Docker 发布会同时推送可追溯的版本标签和滚动标签：
+
+- Git tag（例如 `v1.2.3`）：
+  - `zerodeng/sublink-pro:v1.2.3`
+  - `zerodeng/sublink-pro:latest`
+- `main` 分支：
+  - `zerodeng/sublink-pro:main-{短 commit SHA}`
+  - `zerodeng/sublink-pro:latest`
+- `dev` 分支：
+  - `zerodeng/sublink-pro:dev-{短 commit SHA}`
+  - `zerodeng/sublink-pro:dev`
+- 其他分支：
+  - `zerodeng/sublink-pro:{分支名}-{短 commit SHA}`
+  - `zerodeng/sublink-pro:{分支名}`
+
+因此每次构建都会保留一个包含版本或 commit SHA 的不可变标签，不会只覆盖 `latest`。生产环境建议使用具体版本标签；`latest` 适合跟踪最新稳定版本。
 
 ---
 
