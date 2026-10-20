@@ -888,8 +888,19 @@ func renderPreparedConvertedClient(c *gin.Context, prepared preparedClientRespon
 		c.String(http.StatusBadGateway, "Sub-Store conversion failed: %s", err.Error())
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(prepared.ClientType), "loon") {
+		converted.Body = normalizeLoonSubscription(converted.Body)
+	}
 	c.Writer.Header().Set("Content-Type", converted.ContentType)
 	_, _ = c.Writer.WriteString(converted.Body)
+}
+
+func normalizeLoonSubscription(body string) string {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" || strings.Contains(trimmed, "[Proxy]") {
+		return body
+	}
+	return "[Proxy]\n" + trimmed + "\n"
 }
 
 func extensionForConvertedClient(clientType string) string {

@@ -1221,7 +1221,7 @@ func TestGetClientExpandedTargetUsesMihomoBridgeAndSubStore(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected 200 from converted subscription, got %d body=%q", recorder.Code, recorder.Body.String())
 	}
-	if recorder.Body.String() != "loon converted output" {
+	if recorder.Body.String() != "[Proxy]\nloon converted output\n" {
 		t.Fatalf("unexpected converted body: %q", recorder.Body.String())
 	}
 	if received.Client != "Loon" {
