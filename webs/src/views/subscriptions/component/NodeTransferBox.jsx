@@ -39,6 +39,9 @@ export default function NodeTransferBox({
   availableNodes,
   selectorNodesTotal,
   selectorNodesLoading,
+  availableNodePage = 1,
+  availableNodePageCount = 1,
+  onAvailableNodePageChange = () => {},
   selectedNodes,
   selectedNodesList,
   chainTargetNodeGroups = new Map(),
@@ -309,6 +312,29 @@ export default function NodeTransferBox({
 
   const handleMobileTabChange = (_event, nextTab) => onMobileTabChange(nextTab);
   const handleSelectedNodeSearchChange = (event) => onSelectedNodeSearchChange(event.target.value);
+  const availablePagination = availableNodePageCount > 1 ? (
+    <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ mt: 1 }}>
+      <Button
+        size="small"
+        variant="text"
+        disabled={availableNodePage <= 1 || selectorNodesLoading}
+        onClick={() => onAvailableNodePageChange(availableNodePage - 1)}
+      >
+        {t('common.previous', '上一页')}
+      </Button>
+      <Typography variant="caption" color="text.secondary">
+        {availableNodePage} / {availableNodePageCount}
+      </Typography>
+      <Button
+        size="small"
+        variant="text"
+        disabled={availableNodePage >= availableNodePageCount || selectorNodesLoading}
+        onClick={() => onAvailableNodePageChange(availableNodePage + 1)}
+      >
+        {t('common.next', '下一页')}
+      </Button>
+    </Stack>
+  ) : null;
 
   if (matchDownMd) {
     return (
@@ -354,11 +380,7 @@ export default function NodeTransferBox({
                   }
                 />
                 <Chip
-                  label={
-                    availableNodesTotal > 100
-                      ? t('subscriptions.transfer.showingFirst', { total: availableNodesTotal })
-                      : t('subscriptions.transfer.count', { count: availableNodesTotal })
-                  }
+                  label={`${availableNodePage} / ${availableNodePageCount} · ${availableNodesTotal}`}
                   size="small"
                   color="primary"
                   variant="outlined"
@@ -369,7 +391,7 @@ export default function NodeTransferBox({
                 />
               </Stack>
               <List dense sx={{ pt: 0, ...listSurfaceSx, p: 1 }}>
-                {availableNodes.slice(0, 100).map((node) => (
+                {availableNodes.map((node) => (
                   <ListItem
                     key={node.ID}
                     sx={{
@@ -411,6 +433,7 @@ export default function NodeTransferBox({
                   </ListItem>
                 ))}
               </List>
+              {availablePagination}
             </Paper>
 
             <Paper elevation={3} sx={actionStripSx}>
@@ -605,7 +628,7 @@ export default function NodeTransferBox({
           </Stack>
           <Box sx={{ flexGrow: 1, overflow: 'auto', pr: 1 }}>
             <List dense sx={{ ...listSurfaceSx, p: 1 }}>
-              {availableNodes.slice(0, 100).map((node) => (
+              {availableNodes.map((node) => (
                 <ListItem
                   key={node.ID}
                   sx={{
@@ -638,17 +661,13 @@ export default function NodeTransferBox({
                   </Tooltip>
                 </ListItem>
               ))}
-              {availableNodesTotal > 100 && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center', py: 1 }}>
-                  {t('subscriptions.transfer.moreHidden', { count: availableNodesTotal - 100 })}
-                </Typography>
-              )}
               {selectorNodesLoading && (
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center', py: 1 }}>
                   {t('subscriptions.transfer.loading')}
                 </Typography>
               )}
             </List>
+            {availablePagination}
           </Box>
         </Paper>
       </Grid>

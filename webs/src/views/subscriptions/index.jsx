@@ -195,6 +195,7 @@ export default function SubscriptionList() {
 
   const [availableNodes, setAvailableNodes] = useState([]);
   const [availableNodesTotal, setAvailableNodesTotal] = useState(0);
+  const [availableNodePage, setAvailableNodePage] = useState(1);
   const [availableNodesLoading, setAvailableNodesLoading] = useState(false);
   const [selectedNodeMap, setSelectedNodeMap] = useState({});
   const [nodeCatalog, setNodeCatalog] = useState([]);
@@ -254,10 +255,10 @@ export default function SubscriptionList() {
   const buildSelectorParams = useCallback(
     () => ({
       ...buildNodeFilterParams(),
-      page: 1,
+      page: availableNodePage,
       pageSize: 100
     }),
-    [buildNodeFilterParams]
+    [buildNodeFilterParams, availableNodePage]
   );
 
   const hydrateSelectedNodeMap = useCallback((items) => {
@@ -318,6 +319,10 @@ export default function SubscriptionList() {
       setAvailableNodesLoading(false);
     }
   }, [buildSelectorParams, hydrateSelectedNodeMap]);
+
+  useEffect(() => {
+    setAvailableNodePage(1);
+  }, [nodeGroupFilter, nodeSourceFilter, nodeSearchQuery, nodeCountryFilter]);
 
   const extractShareSearchKeyword = useCallback((input) => {
     const trimmed = input.trim();
@@ -636,6 +641,7 @@ export default function SubscriptionList() {
     setNodeCountryFilter([]);
     setAvailableNodes([]);
     setAvailableNodesTotal(0);
+    setAvailableNodePage(1);
     setSelectedNodeMap({});
     setDialogOpen(true);
     refreshNodeSelector();
@@ -914,7 +920,7 @@ export default function SubscriptionList() {
 
   const handleAddNode = async (nodeId) => {
     if (explicitNodeIdsRef.current.includes(nodeId)) return;
-    await applyExplicitNodeIds([...explicitNodeIdsRef.current, nodeId]);
+    await applyExplicitNodeIds([nodeId, ...explicitNodeIdsRef.current]);
     setCheckedAvailable(checkedAvailable.filter((id) => id !== nodeId));
   };
 
@@ -967,7 +973,7 @@ export default function SubscriptionList() {
     try {
       const response = await getNodeIds(buildNodeFilterParams());
       const matchedIds = response.data || [];
-      await applyExplicitNodeIds(Array.from(new Set([...explicitNodeIdsRef.current, ...matchedIds])));
+      await applyExplicitNodeIds(Array.from(new Set([...matchedIds, ...explicitNodeIdsRef.current])));
       setCheckedAvailable([]);
     } catch (error) {
       console.error(error);
@@ -1001,7 +1007,7 @@ export default function SubscriptionList() {
   };
 
   const handleAddChecked = async () => {
-    await applyExplicitNodeIds(Array.from(new Set([...explicitNodeIdsRef.current, ...checkedAvailable])));
+    await applyExplicitNodeIds(Array.from(new Set([...checkedAvailable, ...explicitNodeIdsRef.current])));
     setCheckedAvailable([]);
   };
 
@@ -1479,6 +1485,9 @@ export default function SubscriptionList() {
         selectorNodesTotal={availableNodeCount}
         selectorNodesLoading={availableNodesLoading}
         selectedNodesList={selectedNodesList}
+        availableNodePage={availableNodePage}
+        availableNodePageCount={Math.max(1, Math.ceil(availableNodesTotal / 100))}
+        onAvailableNodePageChange={setAvailableNodePage}
         selectedNodeSearch={selectedNodeSearch}
         setSelectedNodeSearch={setSelectedNodeSearch}
         groupNodeCounts={groupNodeCounts}

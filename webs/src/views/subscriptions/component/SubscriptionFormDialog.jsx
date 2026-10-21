@@ -115,6 +115,9 @@ export default function SubscriptionFormDialog({
   selectorNodes,
   selectorNodesTotal,
   selectorNodesLoading,
+  availableNodePage,
+  availableNodePageCount,
+  onAvailableNodePageChange,
   selectedNodesList,
   groupNodeCounts,
   allNodeTotal,
@@ -959,6 +962,9 @@ export default function SubscriptionFormDialog({
                       onSelectedNodeSearchChange={setSelectedNodeSearch}
                       selectorNodesTotal={selectorNodesCount}
                       selectorNodesLoading={selectorNodesLoading}
+                      availableNodePage={availableNodePage}
+                      availableNodePageCount={availableNodePageCount}
+                      onAvailableNodePageChange={onAvailableNodePageChange}
                       mobileTab={mobileTab}
                       onMobileTabChange={setMobileTab}
                       matchDownMd={matchDownMd}
