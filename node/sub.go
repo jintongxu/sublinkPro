@@ -10,6 +10,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -345,6 +346,8 @@ func orderedClashProviderNames(config *ClashConfig) []string {
 	return providerNames
 }
 
+var subscriptionFetch = utils.FetchSubscription
+
 func fetchClashProxyProvider(ctx context.Context, client *http.Client, providerName string, providerURL string, rootSubscriptionHost string, userAgent string, requestHeaders models.AirportRequestHeaders) ([]protocol.Proxy, error) {
 	parsedProviderURL, err := validateClashProviderURL(providerURL)
 	if err != nil {
@@ -362,7 +365,7 @@ func fetchClashProxyProvider(ctx context.Context, client *http.Client, providerN
 	}
 
 	providerClient := newClashProviderHTTPClient(client, rootSubscriptionHost, userAgent, requestHeaders)
-	resp, err := providerClient.Do(req)
+	resp, err := subscriptionFetch(req, providerClient)
 	if err != nil {
 		return nil, err
 	}
@@ -417,6 +420,14 @@ func normalizedURLHost(rawURL string) string {
 func newClashProviderHTTPClient(client *http.Client, rootSubscriptionHost string, userAgent string, requestHeaders models.AirportRequestHeaders) *http.Client {
 	providerClient := *client
 	providerClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("too many subscription redirects")
+		}
+		if client.CheckRedirect != nil {
+			if err := client.CheckRedirect(req, via); err != nil {
+				return err
+			}
+		}
 		if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
 			return fmt.Errorf("provider URL scheme %q 不受支持", req.URL.Scheme)
 		}
@@ -466,8 +477,10 @@ type SubscriptionDiagnostic struct {
 
 // SubscriptionParseResult contains all valid links and non-sensitive parse diagnostics.
 type SubscriptionParseResult struct {
-	URLs        []protocol.Urls          `json:"urls"`
-	Diagnostics []SubscriptionDiagnostic `json:"diagnostics,omitempty"`
+	Invalid            int                      `json:"invalid"`
+	OmittedDiagnostics int                      `json:"omittedDiagnostics,omitempty"`
+	URLs               []protocol.Urls          `json:"urls"`
+	Diagnostics        []SubscriptionDiagnostic `json:"diagnostics,omitempty"`
 }
 
 const (
@@ -476,7 +489,11 @@ const (
 )
 
 func addSubscriptionDiagnostic(result *SubscriptionParseResult, kind, message string, line int) {
+	if kind == "link" || kind == "invalid-node" {
+		result.Invalid++
+	}
 	if len(result.Diagnostics) >= subscriptionDiagnosticLimit {
+		result.OmittedDiagnostics++
 		return
 	}
 	message = strings.TrimSpace(message)
@@ -653,7 +670,7 @@ func LoadClashConfigFromURLWithReporter(ctx context.Context, id int, urlStr stri
 			// 使用 mihomo 内核创建代理适配器
 			proxyAdapter, err := mihomo.GetMihomoAdapter(proxyNodeLink)
 			if err != nil {
-				utils.Error("创建 mihomo 代理适配器失败: %v，将直接下载", err)
+				return nil, nil, fmt.Errorf("创建代理失败: %w", err)
 			} else {
 				utils.Info("使用 mihomo 内核代理下载订阅")
 				// 创建自定义 Transport，使用 mihomo adapter 进行代理连接
@@ -672,7 +689,7 @@ func LoadClashConfigFromURLWithReporter(ctx context.Context, id int, urlStr stri
 
 						// 创建 mihomo metadata
 						metadata := &constant.Metadata{
-							Host:    host,
+							DstIP:   netip.MustParseAddr(host),
 							DstPort: uint16(portUint),
 							Type:    constant.HTTP,
 						}
@@ -684,7 +701,7 @@ func LoadClashConfigFromURLWithReporter(ctx context.Context, id int, urlStr stri
 				}
 			}
 		} else {
-			utils.Warn("未找到可用代理，将直接下载")
+			return nil, nil, fmt.Errorf("未找到可用代理")
 		}
 	}
 
@@ -697,7 +714,8 @@ func LoadClashConfigFromURLWithReporter(ctx context.Context, id int, urlStr stri
 
 	applyRequestHeaders(req, userAgent, requestHeaders)
 
-	resp, err := client.Do(req)
+	client = newClashProviderHTTPClient(client, normalizedURLHost(urlStr), userAgent, requestHeaders)
+	resp, err := subscriptionFetch(req, client)
 	if err != nil {
 		utils.Error("URL %s，获取Clash配置失败:  %v", urlStr, err)
 		// 检测是否为 TLS 证书相关错误，给出更明确的提示

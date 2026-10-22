@@ -32,6 +32,8 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import LinkIcon from '@mui/icons-material/Link';
+import CircularProgress from '@mui/material/CircularProgress';
 
 /**
  */
@@ -47,6 +49,8 @@ export default function SubscriptionTable({
   onEdit,
   onDelete,
   onCopy,
+  onCopySubscriptionLink,
+  quickCopyingSubId,
   onPreview,
   onChainProxy,
   onStartSort,
@@ -75,9 +79,13 @@ export default function SubscriptionTable({
     const chain = parseConfig(rule.chainConfig, []);
     const target = parseConfig(rule.targetConfig, {});
     const nodeNames = new Map((sub.Nodes || []).map((node) => [Number(node.ID), getNodeDisplayName(node)]));
-    const formatItem = (item) => item.groupName || item.name || (item.nodeId ? nodeNames.get(Number(item.nodeId)) || `节点 #${item.nodeId}` : item.type || '来源');
+    const formatItem = (item) =>
+      item.groupName || item.name || (item.nodeId ? nodeNames.get(Number(item.nodeId)) || `节点 #${item.nodeId}` : item.type || '来源');
     const source = Array.isArray(chain) && chain.length > 0 ? chain.map(formatItem).join(' → ') : rule.name || '链式规则';
-    const targetText = target.groupName || target.name || (target.nodeId ? nodeNames.get(Number(target.nodeId)) || `节点 #${target.nodeId}` : target.type || '目标');
+    const targetText =
+      target.groupName ||
+      target.name ||
+      (target.nodeId ? nodeNames.get(Number(target.nodeId)) || `节点 #${target.nodeId}` : target.type || '目标');
     return `${source} → ${targetText}`;
   };
 
@@ -90,7 +98,7 @@ export default function SubscriptionTable({
             <TableCell>{t('subscriptions.table.name')}</TableCell>
             <TableCell>{t('subscriptions.table.nodesAndGroups')}</TableCell>
             <TableCell>{t('subscriptions.table.createdAt')}</TableCell>
-            <TableCell align="right" width={350}>
+            <TableCell align="right" width={390}>
               {t('subscriptions.table.actions')}
             </TableCell>
           </TableRow>
@@ -120,6 +128,19 @@ export default function SubscriptionTable({
                 <TableCell>{sub.CreateDate}</TableCell>
                 <TableCell align="right">
                   <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                    <Tooltip title={t('subscriptions.table.tooltips.copyAutoLink')}>
+                      <span>
+                        <IconButton
+                          size="small"
+                          color="primary"
+                          aria-label={t('subscriptions.table.tooltips.copyAutoLink')}
+                          disabled={quickCopyingSubId !== null}
+                          onClick={() => onCopySubscriptionLink(sub)}
+                        >
+                          {quickCopyingSubId === sub.ID ? <CircularProgress size={20} color="inherit" /> : <LinkIcon fontSize="small" />}
+                        </IconButton>
+                      </span>
+                    </Tooltip>
                     <Tooltip title={t('subscriptions.table.tooltips.preview')}>
                       <IconButton size="small" color="info" onClick={() => onPreview(sub)}>
                         <VisibilityIcon fontSize="small" />
@@ -198,39 +219,45 @@ export default function SubscriptionTable({
                           {sub.ChainRules?.filter((rule) => rule.enabled !== false).map((rule) => (
                             <Stack key={`chain-${rule.id}`} direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
                               <AccountTreeIcon fontSize="small" color="warning" />
-                              <Typography variant="caption" color="warning.main">链式引用：</Typography>
+                              <Typography variant="caption" color="warning.main">
+                                链式引用：
+                              </Typography>
                               <Chip label={formatChainRule(rule, sub)} size="small" color="warning" variant="outlined" />
                             </Stack>
                           ))}
                           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                          {getSortedItems(sub).map((item, idx) =>
-                            item._type === 'node' ? (
-                              <Chip
-                                key={item._type + item.ID}
-                                label={item.DialerProxyName ? `经前置：${getNodeDisplayName(item)} → ${item.DialerProxyName}` : getNodeDisplayName(item)}
-                                size="small"
-                                variant="outlined"
-                                color={item.DialerProxyName ? 'warning' : 'success'}
-                                onClick={() => onCopyToClipboard(item.Link)}
-                              />
-                            ) : item._type === 'airport' ? (
-                              <Chip
-                                key={item._type + item.ID}
-                                label={t('subscriptions.sort.airportLabel', { name: item.Name })}
-                                size="small"
-                                variant="outlined"
-                                color="info"
-                              />
-                            ) : (
-                              <Chip
-                                key={item._type + idx}
-                                label={t('subscriptions.sort.groupLabel', { name: item.Name })}
-                                size="small"
-                                variant="outlined"
-                                color="warning"
-                              />
-                            )
-                          )}
+                            {getSortedItems(sub).map((item, idx) =>
+                              item._type === 'node' ? (
+                                <Chip
+                                  key={item._type + item.ID}
+                                  label={
+                                    item.DialerProxyName
+                                      ? `经前置：${getNodeDisplayName(item)} → ${item.DialerProxyName}`
+                                      : getNodeDisplayName(item)
+                                  }
+                                  size="small"
+                                  variant="outlined"
+                                  color={item.DialerProxyName ? 'warning' : 'success'}
+                                  onClick={() => onCopyToClipboard(item.Link)}
+                                />
+                              ) : item._type === 'airport' ? (
+                                <Chip
+                                  key={item._type + item.ID}
+                                  label={t('subscriptions.sort.airportLabel', { name: item.Name })}
+                                  size="small"
+                                  variant="outlined"
+                                  color="info"
+                                />
+                              ) : (
+                                <Chip
+                                  key={item._type + idx}
+                                  label={t('subscriptions.sort.groupLabel', { name: item.Name })}
+                                  size="small"
+                                  variant="outlined"
+                                  color="warning"
+                                />
+                              )
+                            )}
                           </Stack>
                         </Stack>
                       )}

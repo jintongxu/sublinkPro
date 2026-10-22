@@ -57,6 +57,7 @@ suffix for Chinese.
 | User asks about | Doc path |
 |---|---|
 | Smart tag system — rule-based auto-tagging, mutually-exclusive groups, IP quality conditions | `docs/features/tags.md` |
+| Node import, structural revalidation (not speed tests), task recovery/cancellation, subscription validation policies, safe remote fetch | `docs/features/node-validation.md` (Chinese: `docs/features/node-validation.zh-CN.md`) |
 | Speed-test system — two-stage tests, latency/speed, IP quality & unlock checks, tuning | `docs/features/speedtest.md` |
 | Unlock checks — streaming & AI availability, Provider architecture, extensions | `docs/features/unlock-check.md` |
 | Chain proxy — Dialer-Proxy, condition-based node selection, config flow | `docs/features/chain-proxy.md` |

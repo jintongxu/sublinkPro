@@ -2,10 +2,20 @@ package protocol
 
 import (
 	"strings"
+	"sublink/utils"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+func TestSSRMalformedQueryReturnsError(t *testing.T) {
+	for _, query := range []string{"broken", "remarks=bmFtZQ&broken"} {
+		link := "ssr://" + utils.Base64Encode("example.com:8388:origin:aes-256-cfb:plain:c2VjcmV0/?"+query)
+		if _, err := DecodeSSRURL(link); err == nil {
+			t.Fatalf("accepted malformed query %q", query)
+		}
+	}
+}
 
 // TestSSRClashYAMLParametersRoundTrip 验证 SSR 专用参数在 Clash YAML 与 SSR 链接之间不会丢失。
 func TestSSRClashYAMLParametersRoundTrip(t *testing.T) {
@@ -57,5 +67,24 @@ func TestSSRClashYAMLParametersRoundTrip(t *testing.T) {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("Clash YAML output missing %q: %s", want, string(data))
 		}
+	}
+}
+
+func TestSSRQueryRejectsMalformedTokens(t *testing.T) {
+	for _, query := range []string{"broken", "remarks=bm9kZQ==&broken", "broken&remarks=bm9kZQ=="} {
+		t.Run(query, func(t *testing.T) {
+			link := "ssr://" + utils.Base64Encode("example.com:8388:origin:aes-256-cfb:plain:c2VjcmV0/?"+query)
+			if _, err := DecodeSSRURL(link); err == nil {
+				t.Fatal("malformed query accepted")
+			}
+			if _, err := LinkToProxy(Urls{Url: link}, OutputConfig{}); err == nil {
+				t.Fatal("malformed query converted")
+			}
+		})
+	}
+	link := "ssr://" + utils.Base64Encode("example.com:8388:origin:aes-256-cfb:plain:c2VjcmV0/?remarks=bm9kZQ==")
+	decoded, err := DecodeSSRURL(link)
+	if err != nil || decoded.Qurey.Remarks != "node" {
+		t.Fatalf("padded value lost: %+v %v", decoded, err)
 	}
 }

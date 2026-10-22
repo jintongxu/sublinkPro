@@ -1,6 +1,8 @@
 import PropTypes from 'prop-types';
 import { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { getTask, stopTask as stopTaskApi } from 'api/tasks';
+import { getTask, getRunningTasks, stopTask as stopTaskApi } from 'api/tasks';
+import { useAuth } from './AuthContext';
+import { normalizeTask, acceptTask, startTaskReconciliation } from './taskProgressState.mjs';
 
 // ==============================|| TASK PROGRESS CONTEXT ||============================== //
 
@@ -12,6 +14,9 @@ const COMPLETED_TASK_CLEANUP_DELAY = 3000;
 // ==============================|| TASK PROGRESS PROVIDER ||============================== //
 
 export function TaskProgressProvider({ children }) {
+  const { isAuthenticated } = useAuth();
+  const tasksRef = useRef(new Map());
+  const cleanupTimers = useRef(new Set());
   // Map of taskId -> taskData
   const [tasks, setTasks] = useState(new Map());
 
@@ -24,29 +29,27 @@ export function TaskProgressProvider({ children }) {
 
   // Update or add a task
   const updateTask = useCallback((taskId, taskData) => {
-    setTasks((prev) => {
-      const incomingTerminal = ['completed', 'error', 'cancelled'].includes(taskData.status);
-      if (terminalTasksRef.current.has(taskId) && !incomingTerminal) return prev;
-      const newTasks = new Map(prev);
-      const existing = newTasks.get(taskId) || {};
-      newTasks.set(taskId, {
-        ...existing,
-        ...taskData,
-        // Preserve existing startTime unless new one is provided
-        startTime: taskData.startTime || existing.startTime,
-        lastUpdate: Date.now()
-      });
-      return newTasks;
+    const incomingTerminal = ['completed', 'error', 'cancelled'].includes(taskData.status);
+    if (terminalTasksRef.current.has(taskId) && !incomingTerminal) return;
+    const next = new Map(tasksRef.current);
+    const existing = next.get(taskId) || {};
+    next.set(taskId, {
+      ...existing,
+      ...taskData,
+      taskId,
+      startTime: taskData.startTime || existing.startTime,
+      lastUpdate: Date.now()
     });
+    tasksRef.current = next;
+    setTasks(next);
   }, []);
 
   // Remove a task
   const removeTask = useCallback((taskId) => {
-    setTasks((prev) => {
-      const newTasks = new Map(prev);
-      newTasks.delete(taskId);
-      return newTasks;
-    });
+    const next = new Map(tasksRef.current);
+    next.delete(taskId);
+    tasksRef.current = next;
+    setTasks(next);
     // Also remove from stopping set
     setStoppingTasks((prev) => {
       const newSet = new Set(prev);
@@ -57,6 +60,10 @@ export function TaskProgressProvider({ children }) {
 
   // Clear all tasks
   const clearAll = useCallback(() => {
+    tasksRef.current = new Map();
+    terminalTasksRef.current.clear();
+    cleanupTimers.current.forEach(clearTimeout);
+    cleanupTimers.current.clear();
     setTasks(new Map());
     setStoppingTasks(new Set());
   }, []);
@@ -97,13 +104,13 @@ export function TaskProgressProvider({ children }) {
   // Handle incoming progress event from SSE
   const handleProgressEvent = useCallback(
     (data) => {
-      const { taskId, taskType, taskName, status, current, total, currentItem, result, message, startTime, traffic } = data;
+      const normalized = normalizeTask(data);
+      const { taskId, taskType, taskName, status, current, total, currentItem, result, message, startTime, traffic } = normalized;
 
       if (!taskId) return;
 
       const isTerminal = status === 'completed' || status === 'error' || status === 'cancelled';
-      if (terminalTasksRef.current.has(taskId)) return;
-      if (isTerminal) terminalTasksRef.current.add(taskId);
+      if (!acceptTask(terminalTasksRef.current, normalized)) return;
 
       if (isTerminal) {
         // Update task with completed/cancelled status, then schedule removal
@@ -130,9 +137,11 @@ export function TaskProgressProvider({ children }) {
         });
 
         // Auto-remove completed tasks after delay
-        setTimeout(() => {
+        const timer = setTimeout(() => {
+          cleanupTimers.current.delete(timer);
           removeTask(taskId);
         }, COMPLETED_TASK_CLEANUP_DELAY);
+        cleanupTimers.current.add(timer);
       } else {
         // Update task progress
         updateTask(taskId, {
@@ -157,62 +166,42 @@ export function TaskProgressProvider({ children }) {
   // Listen for task_progress CustomEvent from window (dispatched by AuthContext)
   useEffect(() => {
     const handleWindowEvent = (event) => {
-      handleProgressEvent(event.detail);
+      if (isAuthenticated) handleProgressEvent(event.detail);
     };
     window.addEventListener('task_progress', handleWindowEvent);
     return () => {
       window.removeEventListener('task_progress', handleWindowEvent);
     };
-  }, [handleProgressEvent]);
+  }, [handleProgressEvent, isAuthenticated]);
 
   // Convert tasks Map to array for easier rendering
   const taskList = useMemo(() => Array.from(tasks.values()), [tasks]);
 
   // Check if there are any active tasks
   const hasActiveTasks = useMemo(() => taskList.length > 0, [taskList]);
-  const activeTaskIds = useMemo(
-    () => taskList.filter((task) => !['completed', 'error', 'cancelled'].includes(task.status)).map((task) => task.taskId).sort(),
-    [taskList]
-  );
-  const activeTaskKey = activeTaskIds.join(',');
-
-  // SSE is primary; periodic reads replay terminal state across navigation or SSE reconnects.
+  // Authentication owns hydration. One loop survives task changes and reconciles
+  // missed SSE events, reconnects and tasks started on other pages/clients.
   useEffect(() => {
-    if (!activeTaskKey) return undefined;
-    let disposed = false;
-    const taskIds = activeTaskKey.split(',').filter(Boolean);
-    const reconcile = async () => {
-      await Promise.all(
-        taskIds.map(async (taskId) => {
-          try {
-            const response = await getTask(taskId);
-            const task = response.data;
-            if (disposed || !task || !['completed', 'error', 'cancelled'].includes(task.status)) return;
-            handleProgressEvent({
-              taskId: task.id,
-              taskType: task.type,
-              taskName: task.name,
-              status: task.status,
-              current: task.progress,
-              total: task.total,
-              currentItem: task.currentItem,
-              result: task.result ? JSON.parse(task.result) : null,
-              message: task.message,
-              startTime: task.startedAt ? new Date(task.startedAt).getTime() : Date.now()
-            });
-          } catch (error) {
-            if (!disposed) console.error('Failed to reconcile task:', error);
-          }
-        })
-      );
-    };
-    const timer = window.setInterval(reconcile, 5000);
-    reconcile();
+    if (!isAuthenticated) {
+      clearAll();
+      return undefined;
+    }
+    const timers = cleanupTimers.current;
+    const stop = startTaskReconciliation({
+      loadRunning: getRunningTasks,
+      loadTask: getTask,
+      activeIds: () =>
+        Array.from(tasksRef.current.values())
+          .filter((task) => !['completed', 'error', 'cancelled'].includes(task.status))
+          .map((task) => task.taskId),
+      receive: handleProgressEvent
+    });
     return () => {
-      disposed = true;
-      window.clearInterval(timer);
+      stop();
+      timers.forEach(clearTimeout);
+      timers.clear();
     };
-  }, [activeTaskKey, handleProgressEvent]);
+  }, [isAuthenticated, handleProgressEvent, clearAll]);
 
   // Register a callback to be invoked when any task completes
   const registerOnComplete = useCallback((callback) => {

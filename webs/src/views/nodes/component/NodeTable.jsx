@@ -1,3 +1,4 @@
+import { getValidationDisplay } from '../validationDisplay.mjs';
 import PropTypes from 'prop-types';
 import { useState, useEffect, useCallback, useRef } from 'react';
 
@@ -34,11 +35,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import NodeProtocolChip from './NodeProtocolChip';
 
 // utils
-import {
-  formatDateTime,
-  getDelayDisplay,
-  getSpeedDisplay
-} from '../utils';
+import { formatDateTime, getDelayDisplay, getSpeedDisplay } from '../utils';
 import { getNodeThemeTokens } from '../nodeTheme';
 
 const getNodeTableFlexSx = () => ({
@@ -63,23 +60,6 @@ const getNodeTableFlexSx = () => ({
     textOverflow: 'clip !important'
   }
 });
-
-const VALIDATION_STATUSES = ['untested', 'success', 'partial', 'failed', 'disabled'];
-
-const getValidationDisplay = (node, translate) => {
-  const rawStatus = String(node.ValidationStatus || node.validationStatus || 'untested').toLowerCase();
-  const status = VALIDATION_STATUSES.includes(rawStatus) ? rawStatus : 'untested';
-  const color = { untested: 'default', success: 'success', partial: 'warning', failed: 'error', disabled: 'default' }[status];
-  const reason = String(node.ValidationReason || node.validationReason || '')
-    .replace(/https?:\/\/[^\s]+/gi, '[redacted link]')
-    .replace(/(?:token|password|passwd|secret|credential)\s*[:=]\s*[^\s,;]+/gi, '[redacted credential]')
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
-    .trim()
-    .slice(0, 160);
-  const checkedAt = node.ValidationCheckAt || node.validationCheckAt;
-  const detail = [reason, checkedAt && translate('nodes.table.validationCheckedAt', { time: formatDateTime(checkedAt) })].filter(Boolean).join(' · ');
-  return { status, color, label: translate(`nodes.table.validationStatus.${status}`), detail };
-};
 
 /**
  * 桌面端节点表格（精简版）
@@ -563,7 +543,9 @@ export default function NodeTable({
                         </Typography>
                       </Tooltip>
                     ) : (
-                      <Typography variant="caption" color="text.secondary">-</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        -
+                      </Typography>
                     )}
                   </TableCell>
                   <TableCell>
@@ -612,7 +594,9 @@ export default function NodeTable({
                     }}
                   >
                     {(() => {
-                      const nodeAliases = new Set([node.EffectiveName, node.Name, node.LinkName].filter(Boolean).map((name) => name.trim()));
+                      const nodeAliases = new Set(
+                        [node.EffectiveName, node.Name, node.LinkName].filter(Boolean).map((name) => name.trim())
+                      );
                       const proxyTarget = (referenceNodes || []).find(
                         (candidate) =>
                           candidate.ID !== node.ID &&
@@ -622,11 +606,10 @@ export default function NodeTable({
                       );
                       const referencedBy = (referenceNodes || []).filter(
                         (candidate) =>
-                          candidate.ID !== node.ID &&
-                          candidate.DialerProxyName &&
-                          nodeAliases.has(candidate.DialerProxyName.trim())
+                          candidate.ID !== node.ID && candidate.DialerProxyName && nodeAliases.has(candidate.DialerProxyName.trim())
                       );
-                      const getReferenceName = (candidate) => candidate.EffectiveName || candidate.Name || candidate.LinkName || t('nodes.common.unknownNode');
+                      const getReferenceName = (candidate) =>
+                        candidate.EffectiveName || candidate.Name || candidate.LinkName || t('nodes.common.unknownNode');
 
                       if (loadingReferenceNodes) {
                         return <CircularProgress size={16} />;
@@ -644,7 +627,9 @@ export default function NodeTable({
                                 variant="body2"
                                 sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}
                               >
-                                {t('nodes.table.dialerProxyUsage', { name: proxyTarget ? getReferenceName(proxyTarget) : node.DialerProxyName })}
+                                {t('nodes.table.dialerProxyUsage', {
+                                  name: proxyTarget ? getReferenceName(proxyTarget) : node.DialerProxyName
+                                })}
                               </Typography>
                             </Tooltip>
                           )}
@@ -723,85 +708,105 @@ export default function NodeTable({
                     {(() => {
                       const validation = getValidationDisplay(node, t);
                       const chip = <Chip label={validation.label} color={validation.color} variant="outlined" size="small" />;
-                      return validation.detail ? <Tooltip title={validation.detail} arrow>{chip}</Tooltip> : chip;
+                      return validation.detail ? (
+                        <Tooltip title={validation.detail} arrow>
+                          {chip}
+                        </Tooltip>
+                      ) : (
+                        chip
+                      );
                     })()}
                   </TableCell>
-                  {false && <TableCell>
-                    {(() => {
-                      const ipTypeDisplay = getIpTypeDisplay(node.IsBroadcast, node.QualityStatus, node.QualityFamily);
-                      const residentialDisplay = getResidentialDisplay(node.IsResidential, node.QualityStatus, node.QualityFamily);
-                      const fraudScoreDisplay = getFraudScoreDisplay(node.FraudScore, node.QualityStatus, node.QualityFamily);
-                      const qualityStatusDisplay = getQualityStatusDisplay(node.QualityStatus, node.QualityFamily);
-                      const unlockDisplay = getNodeUnlockSummaryDisplay(node, { limit: 2 });
-                      const isUntested =
-                        ipTypeDisplay.state === 'untested' &&
-                        residentialDisplay.state === 'untested' &&
-                        fraudScoreDisplay.state === 'untested';
-                      const shouldMergeQualityTags =
-                        node.QualityStatus !== 'success' &&
-                        ipTypeDisplay.label === residentialDisplay.label &&
-                        residentialDisplay.label === fraudScoreDisplay.label;
+                  {false && (
+                    <TableCell>
+                      {(() => {
+                        const ipTypeDisplay = getIpTypeDisplay(node.IsBroadcast, node.QualityStatus, node.QualityFamily);
+                        const residentialDisplay = getResidentialDisplay(node.IsResidential, node.QualityStatus, node.QualityFamily);
+                        const fraudScoreDisplay = getFraudScoreDisplay(node.FraudScore, node.QualityStatus, node.QualityFamily);
+                        const qualityStatusDisplay = getQualityStatusDisplay(node.QualityStatus, node.QualityFamily);
+                        const unlockDisplay = getNodeUnlockSummaryDisplay(node, { limit: 2 });
+                        const isUntested =
+                          ipTypeDisplay.state === 'untested' &&
+                          residentialDisplay.state === 'untested' &&
+                          fraudScoreDisplay.state === 'untested';
+                        const shouldMergeQualityTags =
+                          node.QualityStatus !== 'success' &&
+                          ipTypeDisplay.label === residentialDisplay.label &&
+                          residentialDisplay.label === fraudScoreDisplay.label;
 
-                      return (
-                        <Box sx={{ display: 'flex', gap: 0.375, flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
-                          {isUntested ? (
-                            <Chip label={t('nodes.table.untested')} color="default" variant="outlined" size="small" />
-                          ) : shouldMergeQualityTags ? (
-                            qualityStatusDisplay.tooltip ? (
-                              <Tooltip title={qualityStatusDisplay.tooltip}>
+                        return (
+                          <Box sx={{ display: 'flex', gap: 0.375, flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
+                            {isUntested ? (
+                              <Chip label={t('nodes.table.untested')} color="default" variant="outlined" size="small" />
+                            ) : shouldMergeQualityTags ? (
+                              qualityStatusDisplay.tooltip ? (
+                                <Tooltip title={qualityStatusDisplay.tooltip}>
+                                  <Chip
+                                    label={qualityStatusDisplay.label}
+                                    color={qualityStatusDisplay.color}
+                                    variant={qualityStatusDisplay.variant}
+                                    size="small"
+                                  />
+                                </Tooltip>
+                              ) : (
                                 <Chip
                                   label={qualityStatusDisplay.label}
                                   color={qualityStatusDisplay.color}
                                   variant={qualityStatusDisplay.variant}
                                   size="small"
                                 />
-                              </Tooltip>
+                              )
                             ) : (
-                              <Chip
-                                label={qualityStatusDisplay.label}
-                                color={qualityStatusDisplay.color}
-                                variant={qualityStatusDisplay.variant}
-                                size="small"
-                              />
-                            )
-                          ) : (
-                            <>
-                              {ipTypeDisplay.tooltip ? (
-                                <Tooltip title={ipTypeDisplay.tooltip}>
+                              <>
+                                {ipTypeDisplay.tooltip ? (
+                                  <Tooltip title={ipTypeDisplay.tooltip}>
+                                    <Chip
+                                      label={ipTypeDisplay.label}
+                                      color={ipTypeDisplay.color}
+                                      variant={ipTypeDisplay.variant}
+                                      size="small"
+                                    />
+                                  </Tooltip>
+                                ) : (
                                   <Chip
                                     label={ipTypeDisplay.label}
                                     color={ipTypeDisplay.color}
                                     variant={ipTypeDisplay.variant}
                                     size="small"
                                   />
-                                </Tooltip>
-                              ) : (
-                                <Chip
-                                  label={ipTypeDisplay.label}
-                                  color={ipTypeDisplay.color}
-                                  variant={ipTypeDisplay.variant}
-                                  size="small"
-                                />
-                              )}
-                              {residentialDisplay.tooltip ? (
-                                <Tooltip title={residentialDisplay.tooltip}>
+                                )}
+                                {residentialDisplay.tooltip ? (
+                                  <Tooltip title={residentialDisplay.tooltip}>
+                                    <Chip
+                                      label={residentialDisplay.label}
+                                      color={residentialDisplay.color}
+                                      variant={residentialDisplay.variant}
+                                      size="small"
+                                    />
+                                  </Tooltip>
+                                ) : (
                                   <Chip
                                     label={residentialDisplay.label}
                                     color={residentialDisplay.color}
                                     variant={residentialDisplay.variant}
                                     size="small"
                                   />
-                                </Tooltip>
-                              ) : (
-                                <Chip
-                                  label={residentialDisplay.label}
-                                  color={residentialDisplay.color}
-                                  variant={residentialDisplay.variant}
-                                  size="small"
-                                />
-                              )}
-                              {fraudScoreDisplay.tooltip ? (
-                                <Tooltip title={fraudScoreDisplay.tooltip}>
+                                )}
+                                {fraudScoreDisplay.tooltip ? (
+                                  <Tooltip title={fraudScoreDisplay.tooltip}>
+                                    <Chip
+                                      label={
+                                        node.QualityStatus === 'success'
+                                          ? fraudScoreDisplay.label
+                                          : fraudScoreDisplay.detailLabel || fraudScoreDisplay.label
+                                      }
+                                      color={fraudScoreDisplay.color}
+                                      variant={fraudScoreDisplay.variant}
+                                      size="small"
+                                      sx={fraudScoreDisplay.sx}
+                                    />
+                                  </Tooltip>
+                                ) : (
                                   <Chip
                                     label={
                                       node.QualityStatus === 'success'
@@ -813,48 +818,36 @@ export default function NodeTable({
                                     size="small"
                                     sx={fraudScoreDisplay.sx}
                                   />
+                                )}
+                              </>
+                            )}
+                            {unlockDisplay?.compactItems.map((item) => {
+                              const chip = (
+                                <Chip
+                                  key={`unlock-${item.provider}`}
+                                  icon={<LockOpenIcon sx={{ fontSize: '12px !important' }} />}
+                                  label={item.compactLabel}
+                                  color={item.color}
+                                  variant={item.variant}
+                                  size="small"
+                                />
+                              );
+                              return item.tooltip ? (
+                                <Tooltip key={`unlock-tip-${item.provider}`} title={item.tooltip}>
+                                  {chip}
                                 </Tooltip>
                               ) : (
-                                <Chip
-                                  label={
-                                    node.QualityStatus === 'success'
-                                      ? fraudScoreDisplay.label
-                                      : fraudScoreDisplay.detailLabel || fraudScoreDisplay.label
-                                  }
-                                  color={fraudScoreDisplay.color}
-                                  variant={fraudScoreDisplay.variant}
-                                  size="small"
-                                  sx={fraudScoreDisplay.sx}
-                                />
-                              )}
-                            </>
-                          )}
-                          {unlockDisplay?.compactItems.map((item) => {
-                            const chip = (
-                              <Chip
-                                key={`unlock-${item.provider}`}
-                                icon={<LockOpenIcon sx={{ fontSize: '12px !important' }} />}
-                                label={item.compactLabel}
-                                color={item.color}
-                                variant={item.variant}
-                                size="small"
-                              />
-                            );
-                            return item.tooltip ? (
-                              <Tooltip key={`unlock-tip-${item.provider}`} title={item.tooltip}>
-                                {chip}
-                              </Tooltip>
-                            ) : (
-                              chip
-                            );
-                          })}
-                          {unlockDisplay?.extraCount > 0 && (
-                            <Chip label={`+${unlockDisplay.extraCount}`} color="default" variant="outlined" size="small" />
-                          )}
-                        </Box>
-                      );
-                    })()}
-                  </TableCell>}
+                                chip
+                              );
+                            })}
+                            {unlockDisplay?.extraCount > 0 && (
+                              <Chip label={`+${unlockDisplay.extraCount}`} color="default" variant="outlined" size="small" />
+                            )}
+                          </Box>
+                        );
+                      })()}
+                    </TableCell>
+                  )}
                   <TableCell className="actions-cell">
                     <Tooltip title={t('nodes.table.speedTest')}>
                       <IconButton size="small" onClick={() => onSpeedTest(node)}>

@@ -1,3 +1,4 @@
+import TaskResultDetails from './TaskResultDetails';
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTheme, alpha, keyframes } from '@mui/material/styles';
@@ -285,6 +286,7 @@ const FabTaskItem = ({ task, currentTime, theme, tokens }) => {
                   >
                     {taskConfig.label}
                   </Typography>
+                  <TaskResultDetails task={task} />
                   {task.taskName && (
                     <Chip
                       label={task.taskName}

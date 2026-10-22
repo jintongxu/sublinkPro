@@ -63,6 +63,8 @@ export default function NodeFilters({
   setResidentialType,
   ipType,
   setIpType,
+  validationStatus,
+  setValidationStatus,
   qualityStatus,
   setQualityStatus,
   unlockRules,
@@ -216,6 +218,17 @@ export default function NodeFilters({
         onChange={(e) => setMaxFraudScore(e.target.value)}
         sx={{ width: 160, ...fieldControlSx }}
       />
+      <FormControl size="small" sx={{ minWidth: 140, ...fieldControlSx }}>
+        <InputLabel>{t('nodes.table.validation')}</InputLabel>
+        <Select value={validationStatus} label={t('nodes.table.validation')} onChange={(e) => setValidationStatus(e.target.value)}>
+          <MenuItem value="">{allLabel}</MenuItem>
+          {['untested', 'success', 'partial', 'failed', 'disabled'].map((status) => (
+            <MenuItem key={status} value={status}>
+              {t(`nodes.table.validationStatus.${status}`)}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
       <FormControl size="small" sx={{ minWidth: 140, ...fieldControlSx }}>
         <InputLabel>{t('nodes.filters.qualityStatus')}</InputLabel>
         <Select value={qualityStatus} label={t('nodes.filters.qualityStatus')} onChange={(e) => setQualityStatus(e.target.value)}>
@@ -486,6 +499,8 @@ NodeFilters.propTypes = {
   setResidentialType: PropTypes.func.isRequired,
   ipType: PropTypes.string.isRequired,
   setIpType: PropTypes.func.isRequired,
+  validationStatus: PropTypes.string.isRequired,
+  setValidationStatus: PropTypes.func.isRequired,
   qualityStatus: PropTypes.string.isRequired,
   setQualityStatus: PropTypes.func.isRequired,
   unlockRules: PropTypes.array.isRequired,

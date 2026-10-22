@@ -104,6 +104,18 @@ func (tm *TaskManager) UpdateProgress(taskID string, progress int, currentItem s
 		return errors.New("任务已进入终态")
 	}
 
+	// Encode the producer-controlled summary before changing any progress state.
+	// Retain it in memory so cancellation/failure can persist the latest counts
+	// through SyncFinalStatus, without adding per-item database writes. A nil
+	// result is a progress-only update and must not erase an existing summary.
+	if result != nil {
+		resultJSON, err := json.Marshal(result)
+		if err != nil {
+			return fmt.Errorf("编码任务进度结果失败: %w", err)
+		}
+		running.Task.Result = string(resultJSON)
+	}
+
 	// 仅更新内存中的任务状态
 	running.Task.Progress = progress
 	running.Task.CurrentItem = currentItem
@@ -150,6 +162,15 @@ func (tm *TaskManager) CompleteTask(taskID string, message string, result any) e
 		return errors.New("任务已进入终态")
 	}
 
+	// Validate result before changing the locked state.
+	var resultJSON []byte
+	if result != nil {
+		var err error
+		resultJSON, err = json.Marshal(result)
+		if err != nil {
+			return fmt.Errorf("编码任务结果失败: %w", err)
+		}
+	}
 	// 更新状态
 	running.Task.Status = models.TaskStatusCompleted
 	running.Task.Message = message
@@ -158,13 +179,12 @@ func (tm *TaskManager) CompleteTask(taskID string, message string, result any) e
 
 	// 设置结果
 	if result != nil {
-		resultJSON, _ := json.Marshal(result)
 		running.Task.Result = string(resultJSON)
 	}
 
 	// 同步最终状态到数据库（任务结束时一次性写入）
 	if err := running.Task.SyncFinalStatus(); err != nil {
-		utils.Error("同步任务最终状态失败: %v", err)
+		return tm.reportPersistenceFailure(running, err)
 	}
 
 	// 广播完成进度（前端用）
@@ -190,6 +210,17 @@ func (tm *TaskManager) CompleteTask(taskID string, message string, result any) e
 	return nil
 }
 
+// Keep the locked terminal guard on persistence failure; never report success.
+func (tm *TaskManager) reportPersistenceFailure(running *RunningTask, err error) error {
+	running.Task.Status = models.TaskStatusError
+	running.Task.Message = "任务终态保存失败，请检查服务日志"
+	running.Cancel()
+	utils.Error("任务终态保存失败: task_id=%s, error=%v", running.Task.ID, err)
+	tm.broadcastProgress(running.Task, "error")
+	// Retain for detail/list reconciliation. No automatic rerun or queue.
+	return fmt.Errorf("任务终态保存失败: %w", err)
+}
+
 // FailTask 任务失败
 func (tm *TaskManager) FailTask(taskID string, errMsg string) error {
 	tm.mutex.Lock()
@@ -210,7 +241,7 @@ func (tm *TaskManager) FailTask(taskID string, errMsg string) error {
 
 	// 同步最终状态到数据库（任务结束时一次性写入）
 	if err := running.Task.SyncFinalStatus(); err != nil {
-		utils.Error("同步任务最终状态失败: %v", err)
+		return tm.reportPersistenceFailure(running, err)
 	}
 
 	// 广播错误进度（前端用）
@@ -268,7 +299,7 @@ func (tm *TaskManager) CancelTask(taskID string) error {
 
 	// 同步最终状态到数据库（任务结束时一次性写入）
 	if err := running.Task.SyncFinalStatus(); err != nil {
-		utils.Error("同步任务最终状态失败: %v", err)
+		return tm.reportPersistenceFailure(running, err)
 	}
 
 	// 广播取消
@@ -411,13 +442,13 @@ func getTaskStatusTitle(status models.TaskStatus) string {
 }
 
 // InitTaskManager 初始化任务管理器（服务启动时调用）
-func InitTaskManager() {
+func InitTaskManager() error {
 	tm := GetTaskManager()
 	utils.Info("任务管理器初始化完成")
 
 	// 将所有运行中的任务标记为错误（防止服务重启后状态不一致）
 	if err := models.MarkRunningTasksAsError(); err != nil {
-		utils.Error("标记运行中任务为错误失败: %v", err)
+		return fmt.Errorf("启动任务对账失败: %w", err)
 	}
 
 	// 清理过期任务（保留最近30天）
@@ -433,7 +464,7 @@ func InitTaskManager() {
 	// 启动僵尸任务检测器
 	go tm.startZombieTaskDetector()
 
-	_ = tm // 确保初始化
+	return nil
 }
 
 // startZombieTaskDetector 启动僵尸任务检测器

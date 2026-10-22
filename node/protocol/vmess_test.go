@@ -5,6 +5,21 @@ import (
 	"testing"
 )
 
+func TestVMessIdentityUsesServerAddress(t *testing.T) {
+	for _, host := range []string{"", "cdn.example.com"} {
+		t.Run("transport-host="+host, func(t *testing.T) {
+			link := EncodeVmessURL(Vmess{Add: "edge.example.com", Host: host, Port: 443, Id: "12345678-1234-1234-1234-123456789abc", Net: "tcp", Ps: "server-identity"})
+			identity, err := ExtractLinkIdentity(link)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if identity.Host != "edge.example.com" || identity.Address != "edge.example.com:443" {
+				t.Fatalf("identity uses optional transport host: %+v", identity)
+			}
+		})
+	}
+}
+
 // TestVmessEncodeDecode 测试 VMess 编解码完整性
 func TestVmessEncodeDecode(t *testing.T) {
 	original := Vmess{
@@ -135,6 +150,21 @@ func TestVmessSpecialCharacters(t *testing.T) {
 
 			assertEqualString(t, "特殊字符名称", name, decoded.Ps)
 			t.Logf("✓ 特殊字符测试通过: %s", name)
+		})
+	}
+}
+
+func TestVmessIdentityUsesServerAddress(t *testing.T) {
+	for _, host := range []string{"", "cdn.example.com"} {
+		t.Run(host, func(t *testing.T) {
+			link := EncodeVmessURL(Vmess{Add: "example.com", Port: "443", Id: "88888888-9999-7777-5555-777777777777", Net: "tcp", Host: host, V: "2"})
+			identity, err := ExtractLinkIdentity(link)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if identity.Host != "example.com" || identity.Address != "example.com:443" {
+				t.Fatalf("unexpected identity: %+v", identity)
+			}
 		})
 	}
 }

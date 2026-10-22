@@ -1,3 +1,4 @@
+import TaskResultDetails from './TaskResultDetails';
 import { useMemo, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTheme, alpha } from '@mui/material/styles';
@@ -84,7 +85,7 @@ const TaskProgressItem = ({ task, currentTime, onStopTask, isStopping }) => {
       icon: iconMap[task.taskType] || CloudSyncIcon,
       label: meta.label,
       accentColor: meta.color,
-      canStop: task.taskType === 'speed_test' || task.taskType === 'sub_update' || task.taskType === 'node_add'
+      canStop: task.taskType === 'speed_test' || task.taskType === 'sub_update' || ['node_add', 'node_revalidate'].includes(task.taskType)
     };
   }, [task.taskType, t]);
 
@@ -155,7 +156,7 @@ const TaskProgressItem = ({ task, currentTime, onStopTask, isStopping }) => {
       return parts.length > 0 ? parts.join(' · ') : null;
     }
 
-    if (task.taskType === 'node_add') {
+    if (['node_add', 'node_revalidate'].includes(task.taskType)) {
       const parts = [];
       if (task.result.added !== undefined) parts.push(t('tasks.result.added', { count: task.result.added }));
       if (task.result.skipped !== undefined) parts.push(t('tasks.result.skipped', { count: task.result.skipped }));
@@ -419,6 +420,7 @@ const TaskProgressItem = ({ task, currentTime, onStopTask, isStopping }) => {
                   )}
                 </Box>
 
+                <TaskResultDetails task={task} />
                 {resultDisplay && (
                   <Typography
                     variant="caption"

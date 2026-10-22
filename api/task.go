@@ -51,9 +51,7 @@ func GetTasks(c *gin.Context) {
 	// 更新列表中运行任务的实时状态
 	for i := range tasks {
 		if running, ok := runningMap[tasks[i].ID]; ok {
-			tasks[i].Progress = running.Progress
-			tasks[i].CurrentItem = running.CurrentItem
-			tasks[i].Status = running.Status
+			tasks[i] = running
 		}
 	}
 
@@ -89,9 +87,7 @@ func GetTask(c *gin.Context) {
 	runningTasks := services.GetTaskManager().GetRunningTasksInfo()
 	for _, t := range runningTasks {
 		if t.ID == taskID {
-			task.Progress = t.Progress
-			task.CurrentItem = t.CurrentItem
-			task.Status = t.Status
+			task = t
 			break
 		}
 	}

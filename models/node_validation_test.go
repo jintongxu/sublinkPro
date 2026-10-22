@@ -66,11 +66,12 @@ func TestNodeValidationFieldsPersistAcrossReloadAndCache(t *testing.T) {
 		t.Fatalf("new node validation fields = %#v, want untested and empty metadata", loaded)
 	}
 
+	snapshot := *node
 	node.ValidationStatus = ValidationStatusPartial
 	node.ValidationReason = "one endpoint returned 502"
 	node.ValidationCheckAt = "2025-01-02T03:04:05Z"
-	if err := node.Update(); err != nil {
-		t.Fatalf("update validation fields: %v", err)
+	if applied, err := ApplyNodeValidationSnapshot(snapshot, node.ValidationStatus, node.ValidationReason, node.ValidationCheckAt); err != nil || !applied {
+		t.Fatalf("update validation fields: applied=%v err=%v", applied, err)
 	}
 	var reloaded Node
 	if err := db.First(&reloaded, node.ID).Error; err != nil {

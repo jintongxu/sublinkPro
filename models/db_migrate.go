@@ -404,6 +404,10 @@ func RunMigrations() error {
 		utils.Error("执行迁移 0040_add_node_skip_tls_verify 失败: %v", err)
 	}
 
+	if err := database.RunCustomMigration("0042_add_subscription_validation_policy", func() error { return migrateSubscriptionValidationPolicy(db) }); err != nil {
+		utils.Error("执行迁移 0042_add_subscription_validation_policy 失败: %v", err)
+	}
+
 	if err := database.RunCustomMigration("0041_add_node_validation_status", func() error {
 		if !db.Migrator().HasColumn(&Node{}, "ValidationStatus") {
 			if err := db.Migrator().AddColumn(&Node{}, "ValidationStatus"); err != nil {
@@ -1418,4 +1422,16 @@ func seedDefaultCountryRules(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+func migrateSubscriptionValidationPolicy(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&Subcription{}) {
+		return nil
+	}
+	if !db.Migrator().HasColumn(&Subcription{}, "ValidationPolicy") {
+		if err := db.Migrator().AddColumn(&Subcription{}, "ValidationPolicy"); err != nil {
+			return err
+		}
+	}
+	return db.Model(&Subcription{}).Where("validation_policy IS NULL OR validation_policy = ''").Update("validation_policy", "all").Error
 }

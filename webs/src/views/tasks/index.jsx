@@ -1,3 +1,4 @@
+import TaskResultDetails from 'components/TaskResultDetails';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTheme, alpha } from '@mui/material/styles';
@@ -1097,6 +1098,7 @@ export default function TaskList() {
           ) : (
             tasks.map((task) => (
               <Box key={task.id}>
+                <TaskResultDetails task={task} />
                 <TaskMobileCard
                   task={task}
                   onStop={handleStopTask}
@@ -1196,6 +1198,7 @@ export default function TaskList() {
                           <Typography variant="body2" sx={{ fontWeight: 500, color: tokens.primaryText }}>
                             {task.name}
                           </Typography>
+                          <TaskResultDetails task={task} />
                           {task.message && (
                             <Tooltip title={task.message} arrow placement="top-start">
                               <Typography

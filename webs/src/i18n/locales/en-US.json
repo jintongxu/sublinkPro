@@ -1731,6 +1731,15 @@
     }
   },
   "nodes": {
+    "validation": {
+      "title": "Revalidate node structure",
+      "selected": "Validate selected",
+      "all": "Validate all filtered ({{count}})",
+      "confirm": "Validate {{count}} nodes? This checks identity and conversion, not connectivity or speed. Remote subscriptions are fetched safely without expanding or adding nodes. Targets are fixed when submitted; later additions are excluded.",
+      "empty": "No nodes to validate",
+      "failed": "Could not start validation",
+      "started": "Structural validation started"
+    },
     "common": {
       "unknownNode": "Unknown node"
     },
@@ -2529,6 +2538,7 @@
       "sortNodes": "Sort nodes"
     },
     "preview": {
+      "validationExcluded": "Validation excluded: {{count}}; chain dependencies: {{dependencies}}",
       "timeout": "Timeout",
       "error": "Error",
       "untested": "Untested",
@@ -2611,7 +2621,9 @@
         "batchSortSuccess": "Batch sort succeeded",
         "batchSortFailed": "Batch sort failed",
         "movedItems": "Moved {{count}} items to position {{position}}",
-        "shareSearchFailed": "Failed to search share links"
+        "shareSearchFailed": "Failed to search share links",
+        "noAvailableShare": "No enabled, unexpired share link is available. Create or enable one in Share Management first.",
+        "copyLinkFailed": "Unable to get the subscription link. Please try again later."
       }
     },
     "table": {
@@ -2625,6 +2637,7 @@
       "tooltips": {
         "preview": "Preview nodes",
         "copy": "Copy this configuration as a new copy",
+        "copyAutoLink": "Copy subscription link (auto-detect)",
         "share": "Share management",
         "accessLogs": "Access logs",
         "chainProxy": "Chain proxy",
@@ -3044,6 +3057,7 @@
       }
     },
     "form": {
+      "manualGroupAssignmentHelper": "Newly selected nodes are not added to any custom proxy group automatically. Assign them manually as needed; when disabled, the Clash template's original group rules apply.",
       "title": {
         "add": "Add Subscription",
         "edit": "Edit Subscription"
@@ -3104,6 +3118,9 @@
         "maxFraudScore": "Max Fraud Score",
         "maxFraudScoreHelper": "0 means no limit; IP quality check must be executed first.",
         "qualityStatus": "Quality Status",
+        "validationPolicy": "Validation policy",
+        "validationPolicyHelper": "Structural validation is not a connectivity test. Excluded chain prerequisites also exclude dependent nodes.",
+        "validationPolicyOptions": {"all": "All nodes (default)", "exclude_failed": "Exclude failed", "only_success": "Successful only"},
         "qualityStatusHelper": "Can distinguish between complete results, incomplete info, test failed, not enabled, and untested.",
         "unlockRules": "Unlock Filter Rules",
         "unlockRulesDesc": "Unlock filtering is not enabled without rules. You can add rules as needed, and set whether multiple rules must all be satisfied or any one is enough.",
@@ -3927,6 +3944,7 @@
       "cancelling": "Stopping"
     },
     "type": {
+      "nodeRevalidate": "Revalidate nodes",
       "speedTest": "Speed test",
       "subUpdate": "Subscription update",
       "tagRule": "Tag rule",
@@ -3945,6 +3963,7 @@
       "clear": "Clear filters"
     },
     "actions": {
+      "viewResult": "View result",
       "stop": "Stop",
       "stopTask": "Stop task",
       "stopping": "Stopping...",
@@ -3965,6 +3984,7 @@
       "hoursAgo": "{{count}} hours ago"
     },
     "result": {
+      "truncated": "Only partial details are shown (up to 200 items and 32 diagnostics); summary counts cover the full result.",
       "speedTestFailed": "Speed test failed",
       "latency": "{{latency}}ms",
       "added": "{{count}} added",

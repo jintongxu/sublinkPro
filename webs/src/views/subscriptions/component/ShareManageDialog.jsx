@@ -30,6 +30,7 @@ import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import LinkIcon from '@mui/icons-material/Link';
+import { resolveSubscriptionServerUrl } from '../subscriptionLink.mjs';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import HistoryIcon from '@mui/icons-material/History';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -148,36 +149,17 @@ export default function ShareManageDialog({ open, subscription, onClose, showMes
   const [confirmInfo, setConfirmInfo] = useState({ title: '', content: '', onConfirm: null });
   const dialogContentRef = useRef(null);
 
-  const getServerUrl = useCallback(() => {
-    const configuredDomain = systemDomainConfig?.trim();
-    if (configuredDomain) {
-      const domain = /^https?:\/\//i.test(configuredDomain) ? configuredDomain : `http://${configuredDomain}`;
-      return domain.replace(/\/+$/, '');
-    }
-
-    // In production, the page origin is the public address. Do not use the
-    // build-time VITE_API_URL here because it commonly points to localhost.
-    if (!import.meta.env.DEV) {
-      return window.location.origin;
-    }
-
-    // During local Vite development, the backend usually runs on port 8000.
-    const apiUrl = import.meta.env.VITE_API_URL;
-    if (apiUrl) {
-      try {
-        const apiOrigin = new URL(apiUrl, window.location.origin);
-        const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
-        if (loopbackHosts.has(apiOrigin.hostname) && window.location.hostname) {
-          apiOrigin.hostname = window.location.hostname;
-        }
-        return apiOrigin.origin;
-      } catch {
-        // Invalid development configuration: use the current page origin.
-      }
-    }
-
-    return window.location.origin;
-  }, [systemDomainConfig]);
+  const getServerUrl = useCallback(
+    () =>
+      resolveSubscriptionServerUrl({
+        systemDomain: systemDomainConfig || '',
+        origin: window.location.origin,
+        hostname: window.location.hostname,
+        development: import.meta.env.DEV,
+        apiUrl: import.meta.env.VITE_API_URL
+      }),
+    [systemDomainConfig]
+  );
 
   const fetchSystemDomain = async () => {
     try {

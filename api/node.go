@@ -6,16 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"sublink/database"
 	"sublink/models"
-	"sublink/node"
 	"sublink/node/protocol"
 	"sublink/services"
 	"sublink/services/unlock"
@@ -23,7 +20,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gopkg.in/yaml.v3"
 )
 
 // Node-add contracts are additive and intentionally independent from the legacy
@@ -75,16 +71,20 @@ type NodeAddItem struct {
 }
 
 type NodeAddResult struct {
-	Mode        string              `json:"mode,omitempty"`
-	Status      NodeAddStatus       `json:"status"`
-	Added       int                 `json:"added"`
-	Skipped     int                 `json:"skipped"`
-	Invalid     int                 `json:"invalid"`
-	Failed      int                 `json:"failed"`
-	Warnings    int                 `json:"warnings,omitempty"`
-	Items       []NodeAddItem       `json:"items,omitempty"`
-	Diagnostics []NodeAddDiagnostic `json:"diagnostics,omitempty"`
-	Retryable   bool                `json:"retryable,omitempty"`
+	Truncated          bool                `json:"truncated,omitempty"`
+	OmittedItems       int                 `json:"omittedItems,omitempty"`
+	OmittedDiagnostics int                 `json:"omittedDiagnostics,omitempty"`
+	DuplicateInfo      map[string]string   `json:"duplicateInfo,omitempty"`
+	Mode               string              `json:"mode,omitempty"`
+	Status             NodeAddStatus       `json:"status"`
+	Added              int                 `json:"added"`
+	Skipped            int                 `json:"skipped"`
+	Invalid            int                 `json:"invalid"`
+	Failed             int                 `json:"failed"`
+	Warnings           int                 `json:"warnings,omitempty"`
+	Items              []NodeAddItem       `json:"items,omitempty"`
+	Diagnostics        []NodeAddDiagnostic `json:"diagnostics,omitempty"`
+	Retryable          bool                `json:"retryable,omitempty"`
 }
 
 const (
@@ -126,6 +126,9 @@ func mergeNodeAddResult(target *NodeAddResult, item NodeAddResult) {
 	target.Items = append(target.Items, item.Items...)
 	target.Diagnostics = append(target.Diagnostics, item.Diagnostics...)
 	target.Retryable = target.Retryable || item.Retryable
+	target.OmittedItems += item.OmittedItems
+	target.OmittedDiagnostics += item.OmittedDiagnostics
+	boundNodeAddResult(target)
 }
 
 func runNodeAddTask(taskID string, ctx context.Context, links []string, input nodeAddInput) {
@@ -143,7 +146,11 @@ func runNodeAddTask(taskID string, ctx context.Context, links []string, input no
 		input.Link = link
 		mergeNodeAddResult(&result, processNodeAdd(ctx, input))
 		classifyNodeAddResult(&result)
-		_ = tm.UpdateProgress(taskID, index+1, safeNodeAddTaskItem(link, index), result)
+		summary := result
+		summary.Items = nil
+		summary.Diagnostics = nil
+		summary.DuplicateInfo = nil
+		_ = tm.UpdateProgress(taskID, index+1, safeNodeAddTaskItem(link, index), summary)
 	}
 	if ctx.Err() != nil || tm.IsTaskCancelled(taskID) {
 		return
@@ -231,126 +238,38 @@ func normalizeUnlockStatus(value string) string {
 	return unlock.NormalizeUnlockStatus(value)
 }
 
-var disallowedSubscriptionPrefixes = []netip.Prefix{
-	netip.MustParsePrefix("0.0.0.0/8"),
-	netip.MustParsePrefix("10.0.0.0/8"),
-	netip.MustParsePrefix("100.64.0.0/10"),
-	netip.MustParsePrefix("127.0.0.0/8"),
-	netip.MustParsePrefix("169.254.0.0/16"),
-	netip.MustParsePrefix("172.16.0.0/12"),
-	netip.MustParsePrefix("192.0.0.0/24"),
-	netip.MustParsePrefix("192.0.2.0/24"),
-	netip.MustParsePrefix("192.88.99.0/24"),
-	netip.MustParsePrefix("192.168.0.0/16"),
-	netip.MustParsePrefix("198.18.0.0/15"),
-	netip.MustParsePrefix("198.51.100.0/24"),
-	netip.MustParsePrefix("203.0.113.0/24"),
-	netip.MustParsePrefix("224.0.0.0/4"),
-	netip.MustParsePrefix("240.0.0.0/4"),
-	netip.MustParsePrefix("::/128"),
-	netip.MustParsePrefix("::1/128"),
-	netip.MustParsePrefix("100::/64"),
-	netip.MustParsePrefix("2001::/32"),
-	netip.MustParsePrefix("2001:2::/48"),
-	netip.MustParsePrefix("2001:10::/28"),
-	netip.MustParsePrefix("2001:20::/28"),
-	netip.MustParsePrefix("2001:db8::/32"),
-	netip.MustParsePrefix("2002::/16"),
-	netip.MustParsePrefix("fc00::/7"),
-	netip.MustParsePrefix("fec0::/10"),
-	netip.MustParsePrefix("fe80::/10"),
-	netip.MustParsePrefix("ff00::/8"),
+func validateSubscriptionDestination(ctx context.Context, raw string) error {
+	return utils.ValidateSubscriptionDestination(ctx, raw)
 }
-
-func isDisallowedSubscriptionIP(ip net.IP) bool {
-	addr, ok := netip.AddrFromSlice(ip)
-	if !ok {
-		return true
-	}
-	addr = addr.Unmap()
-	if !addr.IsGlobalUnicast() {
-		return true
-	}
-	for _, prefix := range disallowedSubscriptionPrefixes {
-		if prefix.Contains(addr) {
-			return true
-		}
-	}
-	return false
-}
-
-func validateSubscriptionDestination(ctx context.Context, rawURL string) error {
-	parsed, err := url.Parse(rawURL)
-	if err != nil || parsed.Hostname() == "" || (!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) {
-		return errors.New("invalid subscription URL")
-	}
-	addresses, err := net.DefaultResolver.LookupIP(ctx, "ip", parsed.Hostname())
-	if err != nil || len(addresses) == 0 {
-		return errors.New("subscription host resolution failed")
-	}
-	for _, ip := range addresses {
-		if isDisallowedSubscriptionIP(ip) {
-			return errors.New("subscription destination is not allowed")
-		}
-	}
-	return nil
-}
-
-func fetchNodeSubscriptionPayload(ctx context.Context, rawURL string, skipTLSVerify bool) ([]byte, error) {
-	if err := validateSubscriptionDestination(ctx, rawURL); err != nil {
-		return nil, err
-	}
-	baseTransport, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return nil, errors.New("unsupported default HTTP transport")
-	}
-	transport := baseTransport.Clone()
-	baseDialer := &net.Dialer{Timeout: 8 * time.Second, KeepAlive: 30 * time.Second}
-	transport.DialContext = func(dialCtx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, err
-		}
-		ips, err := net.DefaultResolver.LookupIP(dialCtx, "ip", host)
-		if err != nil || len(ips) == 0 {
-			return nil, errors.New("subscription host resolution failed")
-		}
-		for _, ip := range ips {
-			if isDisallowedSubscriptionIP(ip) {
-				return nil, errors.New("subscription destination is not allowed")
-			}
-		}
-		return baseDialer.DialContext(dialCtx, network, net.JoinHostPort(ips[0].String(), port))
-	}
-	if skipTLSVerify {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // explicitly requested per-node setting
-	}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   12 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return errors.New("too many subscription redirects")
-			}
-			return validateSubscriptionDestination(req.Context(), req.URL.String())
-		},
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+func fetchNodeSubscriptionPayload(ctx context.Context, raw string, skip bool) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Do(req)
+	resp, err := subscriptionFetch(req, &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: skip}}})
+	if resp != nil && resp.Body != nil {
+		// Preserve the payload/read error; cleanup must also run on fetch errors.
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, errors.New("subscription request failed")
-	}
-	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	return io.ReadAll(resp.Body)
 }
 
+func boundNodeAddResult(result *NodeAddResult) {
+	if len(result.Items) > 200 {
+		result.OmittedItems += len(result.Items) - 200
+		result.Items = result.Items[:200]
+	}
+	if len(result.Diagnostics) > 32 {
+		result.OmittedDiagnostics += len(result.Diagnostics) - 32
+		result.Diagnostics = result.Diagnostics[:32]
+	}
+	result.Truncated = result.OmittedItems > 0 || result.OmittedDiagnostics > 0
+}
 func classifyNodeAddResult(result *NodeAddResult) {
+	boundNodeAddResult(result)
 	switch {
 	case result.Added > 0 && (result.Invalid > 0 || result.Failed > 0 || result.Skipped > 0 || result.Warnings > 0):
 		result.Status = NodeAddStatusPartial
@@ -455,14 +374,15 @@ func parseIntList(c *gin.Context, keys []string) []int {
 
 func buildNodeFilterFromQuery(c *gin.Context) models.NodeFilter {
 	filter := models.NodeFilter{
-		Search:      c.Query("search"),
-		Group:       c.Query("group"),
-		Source:      c.Query("source"),
-		Protocol:    c.Query("protocol"),
-		SpeedStatus: c.Query("speedStatus"),
-		DelayStatus: c.Query("delayStatus"),
-		SortBy:      c.Query("sortBy"),
-		SortOrder:   c.Query("sortOrder"),
+		Search:           c.Query("search"),
+		ValidationStatus: c.Query("validationStatus"),
+		Group:            c.Query("group"),
+		Source:           c.Query("source"),
+		Protocol:         c.Query("protocol"),
+		SpeedStatus:      c.Query("speedStatus"),
+		DelayStatus:      c.Query("delayStatus"),
+		SortBy:           c.Query("sortBy"),
+		SortOrder:        c.Query("sortOrder"),
 	}
 
 	if maxDelayStr := c.Query("maxDelay"); maxDelayStr != "" {
@@ -703,6 +623,10 @@ func NodeUpdadte(c *gin.Context) {
 
 // 获取节点列表
 func NodeGet(c *gin.Context) {
+	if !validNodeValidationStatus(c.Query("validationStatus")) {
+		utils.FailWithMsg(c, "unknown validation status")
+		return
+	}
 	var Node models.Node
 	filter := buildNodeFilterFromQuery(c)
 	page, pageSize := parsePagination(c)
@@ -738,6 +662,10 @@ func NodeGet(c *gin.Context) {
 }
 
 func NodeSelector(c *gin.Context) {
+	if !validNodeValidationStatus(c.Query("validationStatus")) {
+		utils.FailWithMsg(c, "unknown validation status")
+		return
+	}
 	var node models.Node
 	filter := buildNodeFilterFromQuery(c)
 	page, pageSize := parsePagination(c)
@@ -793,6 +721,10 @@ func NodeSelectorByIDs(c *gin.Context) {
 
 // NodeGetIDs 获取符合过滤条件的所有节点ID（用于全选操作）
 func NodeGetIDs(c *gin.Context) {
+	if !validNodeValidationStatus(c.Query("validationStatus")) {
+		utils.FailWithMsg(c, "unknown validation status")
+		return
+	}
 	var Node models.Node
 	filter := buildNodeFilterFromQuery(c)
 
@@ -816,16 +748,8 @@ func NodeAddAsync(c *gin.Context) {
 		utils.FailWithMsg(c, "link  不能为空")
 		return
 	}
-	input := nodeAddInput{
-		Link:            links[0],
-		Name:            c.PostForm("name"),
-		NameMode:        c.PostForm("nameMode"),
-		DialerProxyName: strings.TrimSpace(c.PostForm("dialerProxyName")),
-		Remark:          strings.TrimSpace(c.PostForm("remark")),
-		Group:           c.PostForm("group"),
-		SkipTLSVerify:   c.PostForm("skipTLSVerify") == "true",
-		Tags:            c.PostForm("tags"),
-	}
+	input := nodeAddForm(c)
+
 	task, ctx, err := services.GetTaskManager().CreateTask(models.TaskTypeNodeAdd, "添加节点", models.TaskTriggerManual, len(links))
 	if err != nil {
 		utils.FailWithMsg(c, "创建节点添加任务失败")
@@ -844,257 +768,24 @@ func NodeAddAsync(c *gin.Context) {
 }
 
 // 添加节点
+func nodeAddForm(c *gin.Context) nodeAddInput {
+	mode := c.PostForm("nameMode")
+	if mode == "" {
+		mode = c.PostForm("NameMode")
+	}
+	return nodeAddInput{Link: c.PostForm("link"), Name: c.PostForm("name"), NameMode: mode, Remark: strings.TrimSpace(c.PostForm("remark")), DialerProxyName: strings.TrimSpace(c.PostForm("dialerProxyName")), Group: c.PostForm("group"), SkipTLSVerify: c.PostForm("skipTLSVerify") == "true", Tags: c.PostForm("tags")}
+}
 func NodeAdd(c *gin.Context) {
-	var Node models.Node
-	link := c.PostForm("link")
-	name := c.PostForm("name")
-	nameModeInput := c.PostForm("nameMode")
-	if nameModeInput == "" {
-		nameModeInput = c.PostForm("NameMode")
-	}
-	nameMode := models.NormalizeNodeNameMode(nameModeInput)
-	dialerProxyName := strings.TrimSpace(c.PostForm("dialerProxyName"))
-	remark := strings.TrimSpace(c.PostForm("remark"))
-	group := c.PostForm("group")
-	skipTLSVerify := c.PostForm("skipTLSVerify") == "true"
-	if link == "" {
-		utils.FailWithMsg(c, "link  不能为空")
+	result := processNodeAdd(c.Request.Context(), nodeAddForm(c))
+	if result.Added > 0 {
+		utils.OkDetailed(c, "添加完成", result)
 		return
 	}
-	userProvidedName := strings.TrimSpace(name) != ""
-
-	// Remote subscription URLs are processed independently and return structured outcomes.
-	if parsedURL, parseErr := url.Parse(link); parseErr == nil && (strings.EqualFold(parsedURL.Scheme, "http") || strings.EqualFold(parsedURL.Scheme, "https")) && !protocol.IsHTTPLink(link) {
-		result := NodeAddResult{Mode: "subscription"}
-		payload, fetchErr := fetchNodeSubscriptionPayload(c.Request.Context(), link, skipTLSVerify)
-		if fetchErr != nil {
-			result.Failed = 1
-			result.Diagnostics = []NodeAddDiagnostic{{Code: NodeAddReasonNetworkError, Message: SafeNodeAddError(fetchErr), Retryable: true}}
-			classifyNodeAddResult(&result)
-			utils.FailWithData(c, "远程订阅获取失败", result)
-			return
-		}
-		parsed, _ := node.ParseSubscriptionPayloadWithDiagnostics(payload)
-		for _, diagnostic := range parsed.Diagnostics {
-			result.Diagnostics = append(result.Diagnostics, NodeAddDiagnostic{Code: NodeAddReasonParseError, Message: TruncateNodeAddText(diagnostic.Message, maxNodeAddDiagnostic)})
-		}
-		for _, candidate := range parsed.URLs {
-			identity, identityErr := protocol.ExtractLinkIdentity(candidate.Url)
-			item := NodeAddItem{Name: identity.Name, Protocol: protocol.GetProtocolFromLink(candidate.Url)}
-			if identityErr != nil || item.Protocol == "" {
-				item.Status, item.Reason = NodeAddItemInvalid, NodeAddReasonInvalidInput
-				result.Invalid++
-				result.Items = append(result.Items, item)
-				continue
-			}
-			n := models.Node{Name: identity.Name, Remark: remark, NameMode: models.NodeNameModeLink, Link: candidate.Url, LinkName: identity.Name, LinkAddress: identity.Address, LinkHost: identity.Host, LinkPort: identity.Port, Protocol: item.Protocol, DialerProxyName: dialerProxyName, Group: group, SkipTLSVerify: skipTLSVerify, ClashExtra: candidate.ClashExtra, ValidationStatus: models.ValidationStatusSuccess, ValidationReason: "validated", ValidationCheckAt: time.Now().UTC().Format(time.RFC3339)}
-			if err := n.Add(); err != nil {
-				item.Status, item.Reason = NodeAddItemSkipped, NodeAddReasonDuplicate
-				result.Skipped++
-			} else {
-				item.Status, item.NodeID = NodeAddItemAdded, n.ID
-				result.Added++
-			}
-			result.Items = append(result.Items, item)
-		}
-		classifyNodeAddResult(&result)
-		if result.Added > 0 {
-			utils.OkDetailed(c, "订阅导入完成", result)
-		} else {
-			utils.FailWithData(c, "订阅未导入节点", result)
-		}
+	if result.Skipped > 0 && result.Invalid == 0 && result.Failed == 0 {
+		utils.OkDetailed(c, "节点重复已跳过", gin.H{"skipped": true, "duplicateInfo": result.DuplicateInfo, "result": result})
 		return
 	}
-
-	// 读取全局配置：是否启用跨机场去重（默认启用）
-	crossAirportDedupVal, _ := models.GetSetting("cross_airport_dedup_enabled")
-	enableCrossDedup := crossAirportDedupVal != "false"
-	// 检测是否为 WireGuard 配置文件格式，如果是则转换为 URL 格式
-	if protocol.IsWireGuardConfig(link) {
-		wg, err := protocol.ParseWireGuardConfig(link)
-		if err != nil {
-			utils.FailWithMsg(c, "WireGuard 配置文件解析失败: "+err.Error())
-			return
-		}
-		// 转换为 URL 格式
-		link = protocol.EncodeWireGuardURL(wg)
-	}
-
-	// 检测是否为 Clash YAML 配置格式
-	if strings.Contains(link, "proxies:") {
-		var clashConfig node.ClashConfig
-		if err := yaml.Unmarshal([]byte(link), &clashConfig); err == nil && len(clashConfig.Proxies) > 0 {
-			// 成功解析为 Clash YAML 格式，处理每个代理节点
-			var addedCount, failedCount int
-			for _, proxy := range clashConfig.Proxies {
-				proxyLink := node.GenerateProxyLink(proxy)
-				if proxyLink == "" {
-					failedCount++
-					continue
-				}
-				clashExtra, extraErr := protocol.EncodeClashExtra(proxy)
-				if extraErr != nil {
-					utils.Warn("节点【%s】未知 Clash 属性序列化失败，跳过: %v", proxy.Name, extraErr)
-					failedCount++
-					continue
-				}
-				// 创建节点并添加；Clash YAML 中的备注由系统生成，重复时自动追加编号。
-				var n models.Node
-				n.Name = models.GenerateUniqueNodeName(proxy.Name, 0, nil)
-				n.Remark = remark
-				n.NameMode = models.NodeNameModeLink
-				n.Link = proxyLink
-				n.ClashExtra = clashExtra
-				n.LinkName = proxy.Name
-				n.LinkHost = proxy.Server
-				n.LinkPort = strconv.Itoa(proxy.Port.Int())
-				n.LinkAddress = proxy.Server + ":" + n.LinkPort
-				n.DialerProxyName = dialerProxyName
-				n.Group = group
-				n.SkipTLSVerify = skipTLSVerify
-				n.Protocol = protocol.GetProtocolFromLink(proxyLink)
-
-				// 生成 ContentHash
-				contentHash := protocol.GenerateProxyContentHash(proxy)
-				if contentHash != "" {
-					n.ContentHash = contentHash
-					// 检查是否已存在相同内容的节点（跨机场去重关闭时仅校验同来源）
-					if enableCrossDedup {
-						if _, exists := models.GetNodeByContentHashAndDialer(contentHash, n.DialerProxyName); exists {
-							failedCount++
-							continue
-						}
-					} else if _, exists := models.GetNodeByContentHashSourceAndDialer(contentHash, 0, n.DialerProxyName); exists {
-						failedCount++
-						continue
-					}
-				}
-
-				n.ValidationStatus = models.ValidationStatusSuccess
-				n.ValidationReason = "validated"
-				n.ValidationCheckAt = time.Now().UTC().Format(time.RFC3339)
-				if err := n.Add(); err != nil {
-					failedCount++
-					continue
-				}
-				addedCount++
-			}
-
-			if addedCount == 0 {
-				utils.FailWithMsg(c, "Clash YAML 解析成功但无法添加任何节点（可能全部重复或格式不支持）")
-				return
-			}
-			utils.OkWithMsg(c, "Clash YAML 导入完成，成功添加 "+strconv.Itoa(addedCount)+" 个节点")
-			return
-		}
-	}
-
-	if !strings.Contains(link, "://") {
-		utils.FailWithMsg(c, "link 必须包含 :// 或者是有效的 WireGuard/Clash YAML 配置文件")
-		return
-	}
-	Node.Name = name
-	Node.Remark = remark
-	Node.NameMode = nameMode
-	identity, err := protocol.ExtractLinkIdentity(link)
-	if err != nil {
-		utils.Error("解析节点链接失败: %v", err)
-		return
-	}
-	if strings.TrimSpace(Node.Name) == "" {
-		Node.Name = identity.Name
-	}
-	if userProvidedName {
-		if err := models.EnsureNodeNameAvailable(Node.Name, 0); err != nil {
-			if !failNodeNameConflict(c, err) {
-				utils.FailWithMsg(c, "检查节点备注名称失败")
-			}
-			return
-		}
-	} else {
-		Node.Name = models.GenerateUniqueNodeName(Node.Name, 0, nil)
-	}
-	Node.LinkName = identity.Name
-	Node.LinkAddress = identity.Address
-	Node.LinkHost = identity.Host
-	Node.LinkPort = identity.Port
-
-	Node.Link = link
-	Node.DialerProxyName = strings.TrimSpace(dialerProxyName)
-	Node.Group = group
-	Node.SkipTLSVerify = skipTLSVerify
-	Node.Protocol = protocol.GetProtocolFromLink(link)
-	if Node.Protocol == "" {
-		utils.FailWithData(c, "不支持的节点协议", NodeAddResult{Mode: "link", Status: NodeAddStatusInvalid, Invalid: 1, Items: []NodeAddItem{{Status: NodeAddItemInvalid, Name: Node.Name, Reason: NodeAddReasonUnsupportedProtocol}}})
-		return
-	}
-	Node.ValidationStatus = models.ValidationStatusSuccess
-	Node.ValidationReason = "validated"
-	Node.ValidationCheckAt = time.Now().UTC().Format(time.RFC3339)
-
-	// 生成 ContentHash（用于全库去重）
-	proxy, proxyErr := protocol.LinkToProxy(protocol.Urls{Url: link}, protocol.OutputConfig{})
-	if proxyErr == nil {
-		contentHash := protocol.GenerateProxyContentHash(proxy)
-		if contentHash != "" {
-			Node.ContentHash = contentHash
-			// 检查是否已存在相同内容的节点（跨机场去重关闭时仅校验同来源）
-			var existingNode *models.Node
-			var exists bool
-			if enableCrossDedup {
-				existingNode, exists = models.GetNodeByContentHashAndDialer(contentHash, Node.DialerProxyName)
-			} else {
-				existingNode, exists = models.GetNodeByContentHashSourceAndDialer(contentHash, 0, Node.DialerProxyName)
-			}
-			if exists && existingNode != nil {
-				// 重复节点：返回成功响应 + 跳过标记，不终止添加流程
-				dupSource := existingNode.Source
-				if dupSource == "" || dupSource == "manual" {
-					dupSource = "手动添加"
-				}
-				dupGroup := existingNode.Group
-				if dupGroup == "" {
-					dupGroup = "未分组"
-				}
-				utils.OkDetailed(c, "节点重复已跳过", gin.H{
-					"skipped": true,
-					"duplicateInfo": gin.H{
-						"name":         Node.Name,
-						"source":       dupSource,
-						"group":        dupGroup,
-						"existingName": existingNode.Name,
-					},
-				})
-				return
-			}
-		}
-	}
-
-	err = Node.Add()
-	if err != nil {
-		if failNodeNameConflict(c, err) {
-			return
-		}
-		utils.FailWithMsg(c, "添加失败检查一下是否节点重复")
-		return
-	}
-
-	// 处理标签
-	tags := c.PostForm("tags")
-	if tags != "" {
-		tagNames := strings.Split(tags, ",")
-		// 过滤空字符串
-		var validTagNames []string
-		for _, t := range tagNames {
-			t = strings.TrimSpace(t)
-			if t != "" {
-				validTagNames = append(validTagNames, t)
-			}
-		}
-		_ = Node.SetTagNames(validTagNames)
-	}
-
-	utils.OkWithMsg(c, "添加成功")
+	utils.FailWithData(c, "未添加节点", result)
 }
 
 // 删除节点

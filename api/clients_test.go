@@ -40,6 +40,7 @@ test = select
 `
 
 func TestGetRemoteSubscriptionSkipTLSVerify(t *testing.T) {
+	useLocalSubscriptionFetch(t)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("subscription-body"))
 	}))
@@ -863,6 +864,7 @@ func TestGetClientHeadRequestUsesRequestScopedSubscriptionName(t *testing.T) {
 }
 
 func TestBuildPreparedMihomoYAMLExpandsRemoteClashSubscription(t *testing.T) {
+	useLocalSubscriptionFetch(t)
 	setupClientsAPITestDB(t)
 	templatePath := writeTestClashTemplate(t)
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1612,4 +1614,12 @@ func TestGetClientConcurrentSurgeRequestsKeepSubscriptionScoped(t *testing.T) {
 	if callCount != 2 {
 		t.Fatalf("expected two hook invocations, got %d", callCount)
 	}
+}
+
+// Local fixtures opt in per test; production destination policy remains unchanged.
+func useLocalSubscriptionFetch(t *testing.T) {
+	t.Helper()
+	old := subscriptionFetch
+	subscriptionFetch = func(req *http.Request, client *http.Client) (*http.Response, error) { return client.Do(req) }
+	t.Cleanup(func() { subscriptionFetch = old })
 }

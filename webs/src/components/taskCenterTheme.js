@@ -9,6 +9,7 @@ export const TASK_TYPE_META = {
   tag_rule: { label: 'Tag rule', labelKey: 'tasks.type.tagRule', color: '#f59e0b' },
   db_migration: { label: 'Database migration', labelKey: 'tasks.type.dbMigration', color: '#0284c7' },
   webdav_backup: { label: 'WebDAV backup', labelKey: 'tasks.type.webdavBackup', color: '#0f766e' },
+  node_revalidate: { label: 'Node revalidation', labelKey: 'tasks.type.nodeRevalidate', color: '#0f766e' },
   node_add: { label: 'Node add', labelKey: 'tasks.type.nodeAdd', color: '#2563eb' }
 };
 

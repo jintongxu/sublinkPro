@@ -15,6 +15,7 @@ import (
 	"sublink/database"
 	"sublink/node/protocol"
 	"sublink/utils"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -402,6 +403,8 @@ func NormalizeNodeForImport(node *Node) {
 
 // InitNodeCache 初始化节点缓存
 func InitNodeCache() error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	utils.Info("加载节点列表到缓存")
 	var nodes []Node
 	if err := database.DB.Find(&nodes).Error; err != nil {
@@ -419,11 +422,14 @@ func InitNodeCache() error {
 
 // UpdateNodeCache 更新节点缓存（供外部包使用）
 func UpdateNodeCache(id int, node Node) {
-	node.NormalizeNameModeDefaults()
-	if node.Link != "" {
-		node.syncLinkHash()
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
+	var current Node
+	if err := database.DB.First(&current, id).Error; err == nil {
+		nodeCache.Set(id, current)
+	} else if errors.Is(err, gorm.ErrRecordNotFound) {
+		nodeCache.Delete(id)
 	}
-	nodeCache.Set(id, node)
 }
 
 // FindNodeLinkConflict 查询除当前节点外是否存在相同链接和前置代理的节点。
@@ -446,6 +452,8 @@ func FindNodeLinkConflict(link string, excludeID int) (Node, bool, error) {
 
 // UpdateNodeFields 按字段更新节点并同步缓存。
 func UpdateNodeFields(id int, updates map[string]any) error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if mode, ok := updates["NameMode"].(string); ok {
 		updates["name_mode"] = NormalizeNodeNameMode(mode)
 		delete(updates, "NameMode")
@@ -461,37 +469,63 @@ func UpdateNodeFields(id int, updates map[string]any) error {
 			return err
 		}
 	}
+	var before Node
+	if err := database.DB.First(&before, id).Error; err != nil {
+		return err
+	}
+	after := before
+	// Normalize exported field aliases as well as SQL names at this public boundary.
+	for exported, column := range map[string]string{"Link": "link", "ClashExtra": "clash_extra", "SkipTLSVerify": "skip_tls_verify", "DialerProxyName": "dialer_proxy_name"} {
+		if value, ok := updates[exported]; ok {
+			updates[column] = value
+			delete(updates, exported)
+		}
+	}
+	for key, value := range updates {
+		switch key {
+		case "link", "clash_extra", "dialer_proxy_name":
+			if _, ok := value.(string); !ok {
+				return fmt.Errorf("invalid %s value", key)
+			}
+		case "skip_tls_verify":
+			if _, ok := value.(bool); !ok {
+				return errors.New("invalid skip_tls_verify value")
+			}
+		}
+	}
+	if v, ok := updates["link"].(string); ok {
+		after.Link = v
+		updates["link_hash"] = hashNodeLink(v)
+	}
+	if v, ok := updates["clash_extra"].(string); ok {
+		after.ClashExtra = v
+	}
+	if v, ok := updates["skip_tls_verify"].(bool); ok {
+		after.SkipTLSVerify = v
+	}
+	if v, ok := updates["dialer_proxy_name"].(string); ok {
+		after.DialerProxyName = strings.TrimSpace(v)
+		updates["dialer_proxy_name"] = after.DialerProxyName
+	}
+	if !sameNodeValidationInput(before, after) {
+		resetNodeValidationFields(updates)
+	}
+
 	if err := database.DB.Model(&Node{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return err
 	}
-	if cachedNode, ok := nodeCache.Get(id); ok {
-		if link, ok := updates["link"].(string); ok {
-			cachedNode.Link = link
-			cachedNode.LinkHash = hashNodeLink(link)
-		}
-		if clashExtra, ok := updates["clash_extra"].(string); ok {
-			cachedNode.ClashExtra = clashExtra
-		}
-		if linkName, ok := updates["link_name"].(string); ok {
-			cachedNode.LinkName = linkName
-		}
-		if name, ok := updates["name"].(string); ok {
-			cachedNode.Name = name
-		}
-		if nameMode, ok := updates["name_mode"].(string); ok {
-			cachedNode.NameMode = NormalizeNodeNameMode(nameMode)
-		}
-		if linkCountry, ok := updates["link_country"].(string); ok {
-			cachedNode.LinkCountry = linkCountry
-		}
-		cachedNode.EffectiveNameValue = cachedNode.EffectiveName()
-		nodeCache.Set(id, cachedNode)
+	var current Node
+	if err := database.DB.First(&current, id).Error; err != nil {
+		return err
 	}
+	nodeCache.Set(id, current)
 	return nil
 }
 
 // Add 添加节点
 func (node *Node) Add() error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	node.NormalizeNameModeDefaults()
 	if node.ValidationStatus == "" {
 		node.ValidationStatus = ValidationStatusUntested
@@ -522,11 +556,25 @@ func (node *Node) Add() error {
 
 // Update 更新节点
 func (node *Node) Update() error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	node.NormalizeNameModeDefaults()
 	node.DialerProxyName = strings.TrimSpace(node.DialerProxyName)
 	if err := EnsureNodeNameAvailable(node.Name, node.ID); err != nil {
 		return err
 	}
+	var before Node
+	if err := database.DB.First(&before, node.ID).Error; err != nil {
+		return err
+	}
+	if !sameNodeValidationInput(before, *node) {
+		resetNodeValidation(node)
+	} else {
+		// Metadata editors may have loaded before a validation completed. They
+		// cannot roll its result back by replaying their stale local fields.
+		node.ValidationStatus, node.ValidationReason, node.ValidationCheckAt = before.ValidationStatus, before.ValidationReason, before.ValidationCheckAt
+	}
+
 	node.syncLinkHash()
 	node.UpdatedAt = time.Now()
 	// Write-Through: 先写数据库
@@ -573,6 +621,8 @@ func (node *Node) Update() error {
 
 // UpdateSpeed 更新节点测速结果
 func (node *Node) UpdateSpeed() error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	err := database.DB.Model(node).Select("Speed", "SpeedStatus", "LinkCountry", "LandingIP", "DelayTime", "DelayStatus", "LatencyCheckAt", "SpeedCheckAt", "IsBroadcast", "IsResidential", "FraudScore", "QualityStatus", "QualityFamily", "UnlockSummary", "UnlockCheckAt").Updates(node).Error
 	if err != nil {
 		return err
@@ -601,23 +651,24 @@ func (node *Node) UpdateSpeed() error {
 
 // SpeedTestResult 测速结果结构（用于批量更新）
 type SpeedTestResult struct {
-	NodeID          int
-	Speed           float64
-	SpeedStatus     string
-	DelayTime       int
-	DelayStatus     string
-	LatencyCheckAt  string
-	SpeedCheckAt    string
-	LinkCountry     string
-	LandingIP       string
-	SkipSpeedFields bool // 是否跳过速度相关字段更新（用于TCP模式保留速度结果）
-	IsBroadcast     bool // IP来源：true=广播IP
-	IsResidential   bool // 是否住宅IP
-	FraudScore      int  // 欺诈评分（0-100，-1=未检测）
-	QualityStatus   string
-	QualityFamily   string
-	UnlockSummary   string
-	UnlockCheckAt   string
+	NodeID           int
+	Speed            float64
+	SpeedStatus      string
+	DelayTime        int
+	DelayStatus      string
+	LatencyCheckAt   string
+	SpeedCheckAt     string
+	LinkCountry      string
+	LandingIP        string
+	SkipSpeedFields  bool // 是否跳过速度相关字段更新（用于TCP模式保留速度结果）
+	IsBroadcast      bool // IP来源：true=广播IP
+	IsResidential    bool // 是否住宅IP
+	FraudScore       int  // 欺诈评分（0-100，-1=未检测）
+	QualityStatus    string
+	ValidationStatus string `json:"validationStatus"`
+	QualityFamily    string
+	UnlockSummary    string
+	UnlockCheckAt    string
 }
 
 // BatchAddNodes 批量添加节点（高效 + 容错）
@@ -627,6 +678,8 @@ type SpeedTestResult struct {
 // 3. 批量插入失败时，降级到逐条插入以保证容错性
 // 4. 单条失败只记录日志，不影响其他节点
 func BatchAddNodes(nodes []Node) error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if len(nodes) == 0 {
 		return nil
 	}
@@ -710,6 +763,8 @@ func fallbackToIndividualNodeInsert(nodes []Node) int {
 // 4. 单条失败只记录日志，不影响其他记录
 // 5. 支持 SkipSpeedFields 标记，跳过速度相关字段更新
 func BatchUpdateSpeedResults(results []SpeedTestResult) error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if len(results) == 0 {
 		return nil
 	}
@@ -975,6 +1030,8 @@ func chunkNodes(nodes []Node, chunkSize int) [][]Node {
 
 // FindByLinkAndDialer 按出站链接和前置代理精确查找节点。
 func (node *Node) FindByLinkAndDialer(link, dialerProxyName string) error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if strings.TrimSpace(link) == "" {
 		return fmt.Errorf("node link is required")
 	}
@@ -996,6 +1053,8 @@ func (node *Node) FindByLinkAndDialer(link, dialerProxyName string) error {
 
 // FindByLinkAndName 按链接和名称查找节点，兼容旧客户端未提交前置字段的更新请求。
 func (node *Node) FindByLinkAndName(link, name string) error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if strings.TrimSpace(link) == "" || strings.TrimSpace(name) == "" {
 		return fmt.Errorf("node link and name are required")
 	}
@@ -1010,6 +1069,8 @@ func (node *Node) FindByLinkAndName(link, name string) error {
 
 // Find 查找节点是否重复
 func (node *Node) Find() error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	// 优先用 link 精确查找；历史调用仍返回匹配到的第一条记录。
 
 	if node.Link != "" {
@@ -1057,6 +1118,8 @@ func (node *Node) Find() error {
 // FindByName 仅通过名称查找节点（精确匹配）
 // 用于订阅节点关联场景，避免 Find() 中 link="" 条件导致的错误匹配
 func (node *Node) FindByName() error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if node.Name == "" {
 		return fmt.Errorf("node name is required")
 	}
@@ -1081,6 +1144,8 @@ func (node *Node) FindByName() error {
 
 // GetByID 根据ID查找节点
 func (node *Node) GetByID() error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if cachedNode, ok := nodeCache.Get(node.ID); ok {
 		*node = cachedNode
 		return nil
@@ -1135,28 +1200,29 @@ func (node *Node) List() ([]Node, error) {
 }
 
 type NodeFilter struct {
-	Search          string   // 搜索关键词（匹配节点名称或链接）
-	Group           string   // 分组过滤
-	Source          string   // 来源过滤
-	Protocol        string   // 协议类型过滤（如 vmess, vless, trojan 等）
-	MaxDelay        int      // 最大延迟(ms)，只显示延迟在此值以下的节点
-	MinSpeed        float64  // 最低速度(MB/s)，只显示速度在此值以上的节点
-	SpeedStatus     string   // 速度状态过滤: untested, success, timeout, error
-	DelayStatus     string   // 延迟状态过滤: untested, success, timeout, error
-	Countries       []string // 国家代码过滤
-	Tags            []string // 标签过滤（匹配任一标签的节点）
-	SortBy          string   // 排序字段: "delay" 或 "speed"
-	SortOrder       string   // 排序顺序: "asc" 或 "desc"
-	MaxFraudScore   int      // 最大欺诈评分（0=不限制）
-	ResidentialType string   // 住宅属性过滤: residential/datacenter/untested
-	IPType          string   // IP类型过滤: native/broadcast/untested
-	QualityStatus   string
-	UnlockProvider  string
-	UnlockStatus    string
-	UnlockKeyword   string
-	UnlockRules     []UnlockFilterRule
-	UnlockRuleMode  string
-	ExcludeIDs      []int
+	Search           string   // 搜索关键词（匹配节点名称或链接）
+	Group            string   // 分组过滤
+	Source           string   // 来源过滤
+	Protocol         string   // 协议类型过滤（如 vmess, vless, trojan 等）
+	MaxDelay         int      // 最大延迟(ms)，只显示延迟在此值以下的节点
+	MinSpeed         float64  // 最低速度(MB/s)，只显示速度在此值以上的节点
+	SpeedStatus      string   // 速度状态过滤: untested, success, timeout, error
+	DelayStatus      string   // 延迟状态过滤: untested, success, timeout, error
+	Countries        []string // 国家代码过滤
+	Tags             []string // 标签过滤（匹配任一标签的节点）
+	SortBy           string   // 排序字段: "delay" 或 "speed"
+	SortOrder        string   // 排序顺序: "asc" 或 "desc"
+	MaxFraudScore    int      // 最大欺诈评分（0=不限制）
+	ResidentialType  string   // 住宅属性过滤: residential/datacenter/untested
+	IPType           string   // IP类型过滤: native/broadcast/untested
+	ValidationStatus string   `json:"validationStatus"`
+	QualityStatus    string
+	UnlockProvider   string
+	UnlockStatus     string
+	UnlockKeyword    string
+	UnlockRules      []UnlockFilterRule
+	UnlockRuleMode   string
+	ExcludeIDs       []int
 }
 
 func hasNodeQualityData(n Node) bool {
@@ -1378,6 +1444,15 @@ func (node *Node) ListWithFilters(filter NodeFilter) ([]Node, error) {
 			}
 		}
 
+		if filter.ValidationStatus != "" && filter.ValidationStatus != "all" {
+			status := n.ValidationStatus
+			if status == "" {
+				status = ValidationStatusUntested
+			}
+			if status != filter.ValidationStatus {
+				return false
+			}
+		}
 		if !matchNodeQualityStatus(n, filter.QualityStatus) {
 			return false
 		}
@@ -1437,6 +1512,21 @@ func (node *Node) ListWithFilters(filter NodeFilter) ([]Node, error) {
 					return nodes[i].Speed > nodes[j].Speed
 				}
 				return nodes[i].Speed < nodes[j].Speed
+			case "validation":
+				a, b := nodes[i].ValidationStatus, nodes[j].ValidationStatus
+				if a == "" {
+					a = ValidationStatusUntested
+				}
+				if b == "" {
+					b = ValidationStatusUntested
+				}
+				if a == b {
+					return nodes[i].ID < nodes[j].ID
+				}
+				if filter.SortOrder == "desc" {
+					return a > b
+				}
+				return a < b
 			case "name":
 				aName := nodes[i].EffectiveName()
 				bName := nodes[j].EffectiveName()
@@ -1635,6 +1725,8 @@ func FilterNodesByTags(nodes []Node, tags []string) []Node {
 
 // Del 删除节点
 func (node *Node) Del() error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	// 先清除节点与订阅的关联关系
 	if err := database.DB.Exec("DELETE FROM subcription_nodes WHERE node_id = ?", node.ID).Error; err != nil {
 		return err
@@ -1651,6 +1743,8 @@ func (node *Node) Del() error {
 
 // UpsertNode 插入或更新节点
 func (node *Node) UpsertNode() error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	node.NormalizeNameModeDefaults()
 	node.DialerProxyName = strings.TrimSpace(node.DialerProxyName)
 	if err := EnsureNodeNameAvailable(node.Name, node.ID); err != nil {
@@ -1677,6 +1771,8 @@ func (node *Node) UpsertNode() error {
 
 // DeleteAutoSubscriptionNodes 删除订阅节点
 func DeleteAutoSubscriptionNodes(sourceId int) error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	// 使用二级索引获取要删除的节点
 	nodesToDelete := nodeCache.GetByIndex("sourceID", strconv.Itoa(sourceId))
 	nodeIDs := make([]int, 0, len(nodesToDelete))
@@ -1706,6 +1802,8 @@ func DeleteAutoSubscriptionNodes(sourceId int) error {
 
 // BatchDel 批量删除节点 - 使用事务保证原子性
 func BatchDel(ids []int) error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if len(ids) == 0 {
 		return nil
 	}
@@ -1739,6 +1837,8 @@ func BatchDel(ids []int) error {
 
 // BatchUpdateGroup 批量更新节点分组 - 使用事务保证原子性
 func BatchUpdateGroup(ids []int, group string) error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if len(ids) == 0 {
 		return nil
 	}
@@ -1764,6 +1864,8 @@ func BatchUpdateGroup(ids []int, group string) error {
 
 // BatchUpdateDialerProxy 批量更新节点前置代理 - 使用事务保证原子性
 func BatchUpdateDialerProxy(ids []int, dialerProxyName string) error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if len(ids) == 0 {
 		return nil
 	}
@@ -1792,7 +1894,9 @@ func BatchUpdateDialerProxy(ids []int, dialerProxyName string) error {
 
 	// 使用事务更新
 	err := database.WithTransaction(func(tx *gorm.DB) error {
-		return tx.Model(&Node{}).Where("id IN ?", ids).Update("dialer_proxy_name", dialerProxyName).Error
+		fields := map[string]any{"dialer_proxy_name": dialerProxyName}
+		resetNodeValidationFields(fields)
+		return tx.Model(&Node{}).Where("id IN ? AND dialer_proxy_name <> ?", ids, dialerProxyName).Updates(fields).Error
 	})
 
 	if err != nil {
@@ -1802,7 +1906,14 @@ func BatchUpdateDialerProxy(ids []int, dialerProxyName string) error {
 	// 事务成功后更新缓存
 	for _, id := range ids {
 		if n, ok := nodeCache.Get(id); ok {
+			if n.DialerProxyName != dialerProxyName {
+				resetNodeValidation(&n)
+			}
 			n.DialerProxyName = dialerProxyName
+			// Reload DB timestamp so future snapshots use the persisted revision.
+			if err := database.DB.First(&n, id).Error; err != nil {
+				return err
+			}
 			nodeCache.Set(id, n)
 		}
 	}
@@ -1811,6 +1922,8 @@ func BatchUpdateDialerProxy(ids []int, dialerProxyName string) error {
 
 // BatchUpdateSource 批量更新节点来源 - 使用事务保证原子性
 func BatchUpdateSource(ids []int, source string) error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if len(ids) == 0 {
 		return nil
 	}
@@ -1836,6 +1949,8 @@ func BatchUpdateSource(ids []int, source string) error {
 
 // BatchUpdateCountry 批量更新节点国家代码 - 使用事务保证原子性
 func BatchUpdateCountry(ids []int, country string) error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if len(ids) == 0 {
 		return nil
 	}
@@ -1921,6 +2036,8 @@ func ListBySourceID(sourceID int) ([]Node, error) {
 
 // UpdateNodesBySourceID 根据订阅ID批量更新节点的来源名称和分组
 func UpdateNodesBySourceID(sourceID int, sourceName string, group string) error {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	// Write-Through: 先更新数据库
 	updateFields := map[string]any{
 		"source": sourceName,
@@ -1974,6 +2091,8 @@ func BuildNodeInfoUpdate(existing Node, linkName string, link string, sourceSort
 // BatchUpdateNodeInfo 批量更新节点的原始名称和链接信息。
 // 用于订阅拉取时，节点配置未变但原始名称/链接发生变化的场景；用户备注仅在 link 模式或历史等值同步状态下随原始名称刷新。
 func BatchUpdateNodeInfo(updates []NodeInfoUpdate) (int, error) {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if len(updates) == 0 {
 		return 0, nil
 	}
@@ -2153,6 +2272,19 @@ func tryBatchUpdateNodeInfoWithCaseWhen(plans []nodeInfoUpdatePlan) (int, error)
 	args := make([]any, 0, len(plans)*5+1)
 	sb.WriteString("UPDATE nodes SET ")
 
+	// Emit validation assignments before link/extra for MySQL left-to-right SET semantics.
+	for _, column := range []string{"validation_status", "validation_reason", "validation_check_at"} {
+		sb.WriteString(column + " = CASE ")
+		for _, plan := range plans {
+			fmt.Fprintf(&sb, "WHEN id = %d AND (link <> ? OR COALESCE(clash_extra, '') <> ?) THEN ? ", plan.ID)
+			value := ""
+			if column == "validation_status" {
+				value = ValidationStatusUntested
+			}
+			args = append(args, plan.Link, plan.ClashExtra, value)
+		}
+		sb.WriteString("ELSE " + column + " END, ")
+	}
 	first := true
 	appendCaseColumn := func(column string, value func(nodeInfoUpdatePlan) any) {
 		if !first {
@@ -2252,6 +2384,9 @@ func updateNodeInfoCache(plan nodeInfoUpdatePlan) {
 		if plan.SyncName {
 			cachedNode.Name = plan.Name
 		}
+		if cachedNode.Link != plan.Link || cachedNode.ClashExtra != plan.ClashExtra {
+			resetNodeValidation(&cachedNode)
+		}
 		cachedNode.LinkName = plan.LinkName
 		cachedNode.Link = plan.Link
 		cachedNode.ClashExtra = plan.ClashExtra
@@ -2284,6 +2419,13 @@ func fallbackToIndividualNodeInfoUpdate(updates []NodeInfoUpdate) int {
 			fields["name"] = plan.Name
 		}
 
+		var before Node
+		if err := database.DB.First(&before, plan.ID).Error; err != nil {
+			continue
+		}
+		if before.Link != plan.Link || before.ClashExtra != plan.ClashExtra {
+			resetNodeValidationFields(fields)
+		}
 		result := database.DB.Model(&Node{}).Where("id = ?", plan.ID).Updates(fields)
 		if result.Error != nil {
 			utils.Warn("更新节点信息失败 ID=%d: %v", plan.ID, result.Error)
@@ -2975,6 +3117,8 @@ func NodeExistsByContentHash(contentHash string) bool {
 // GetNodeByContentHashAndDialer 根据 ContentHash + 前置代理获取节点（如果存在）。
 // ContentHash 不包含前置代理，因此相同出站节点可以通过不同前置并存。
 func GetNodeByContentHashAndDialer(contentHash, dialerProxyName string) (*Node, bool) {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if contentHash == "" {
 		return nil, false
 	}
@@ -3021,6 +3165,8 @@ func GetNodeByContentHash(contentHash string) (*Node, bool) {
 
 // GetNodeByContentHashSourceAndDialer 根据 ContentHash、来源和前置代理获取节点。
 func GetNodeByContentHashSourceAndDialer(contentHash string, sourceID int, dialerProxyName string) (*Node, bool) {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
 	if contentHash == "" {
 		return nil, false
 	}
@@ -3117,4 +3263,54 @@ func getOtherNodeByContentHashSourceAndDialer(contentHash string, sourceID int, 
 		}
 	}
 	return nil, false
+}
+
+// nodeValidationMu serializes sensitive mutation DB/cache pairs with conditional
+// validation writes. Network/parsing work MUST happen outside this lock.
+var nodeValidationMu sync.Mutex
+
+func sameNodeValidationInput(a, b Node) bool {
+	return a.Link == b.Link && a.ClashExtra == b.ClashExtra && a.SkipTLSVerify == b.SkipTLSVerify && a.DialerProxyName == b.DialerProxyName
+}
+func resetNodeValidation(n *Node) {
+	n.ValidationStatus, n.ValidationReason, n.ValidationCheckAt = ValidationStatusUntested, "", ""
+}
+func resetNodeValidationFields(fields map[string]any) {
+	fields["validation_status"], fields["validation_reason"], fields["validation_check_at"] = ValidationStatusUntested, "", ""
+}
+
+// ApplyNodeValidationSnapshot writes only validation metadata and only while the
+// persisted input AND revision still match. Revision guards edit/revert (ABA).
+// Deleted rows are never recreated; the cache is refreshed from DB, not snapshot.
+func ApplyNodeValidationSnapshot(snapshot Node, status, reason, checkedAt string) (bool, error) {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
+	fields := map[string]any{"validation_status": status, "validation_reason": reason, "validation_check_at": checkedAt}
+	result := database.DB.Model(&Node{}).Where("id = ? AND link = ? AND COALESCE(clash_extra, '') = ? AND skip_tls_verify = ? AND COALESCE(dialer_proxy_name, '') = ? AND updated_at = ? AND COALESCE(validation_check_at, '') = ?", snapshot.ID, snapshot.Link, snapshot.ClashExtra, snapshot.SkipTLSVerify, snapshot.DialerProxyName, snapshot.UpdatedAt, snapshot.ValidationCheckAt).UpdateColumns(fields)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return false, nil
+	}
+	var current Node
+	if err := database.DB.First(&current, snapshot.ID).Error; err != nil {
+		return false, err
+	}
+	nodeCache.Set(current.ID, current)
+	return true, nil
+}
+
+// NodeValidationSnapshots fixes the complete existing target set before work starts.
+func NodeValidationSnapshots(ids []int) ([]Node, error) {
+	nodeValidationMu.Lock()
+	defer nodeValidationMu.Unlock()
+	var nodes []Node
+	if err := database.DB.Where("id IN ?", ids).Order("id").Find(&nodes).Error; err != nil {
+		return nil, err
+	}
+	if len(nodes) != len(ids) {
+		return nil, errors.New("one or more nodes no longer exist")
+	}
+	return nodes, nil
 }

@@ -70,6 +70,10 @@ type Subcription struct {
 	CreatedAt               time.Time         `json:"CreatedAt"`
 	UpdatedAt               time.Time         `json:"UpdatedAt"`
 	DeletedAt               gorm.DeletedAt    `gorm:"index" json:"DeletedAt"`
+
+	ValidationPolicy                  string `gorm:"default:all" json:"ValidationPolicy"`
+	ValidationExcludedCount           int    `gorm:"-" json:"-"`
+	ValidationDependencyExcludedCount int    `gorm:"-" json:"-"`
 }
 
 type GroupWithSort struct {
@@ -143,7 +147,12 @@ func InitSubcriptionCache() error {
 
 // Add 添加订阅 (Write-Through)
 func (sub *Subcription) Add() error {
-	err := database.DB.Create(sub).Error
+	policy, err := NormalizeValidationPolicy(sub.ValidationPolicy)
+	if err != nil {
+		return err
+	}
+	sub.ValidationPolicy = policy
+	err = database.DB.Create(sub).Error
 	if err != nil {
 		return err
 	}
@@ -259,7 +268,13 @@ func (sub *Subcription) AddScripts(scriptIDs []int) error {
 
 // 更新订阅 (Write-Through)
 func (sub *Subcription) Update() error {
+	policy, err := NormalizeValidationPolicy(sub.ValidationPolicy)
+	if err != nil {
+		return err
+	}
+	sub.ValidationPolicy = policy
 	updates := map[string]any{
+		"validation_policy":         sub.ValidationPolicy,
 		"name":                      sub.Name,
 		"config":                    sub.Config,
 		"create_date":               sub.CreateDate,
@@ -294,7 +309,7 @@ func (sub *Subcription) Update() error {
 		"node_template_assignments": sub.NodeTemplateAssignments,
 		"explicit_node_ids":         sub.ExplicitNodeIDs,
 	}
-	err := database.DB.Model(&Subcription{}).Where("id = ? or name = ?", sub.ID, sub.Name).Updates(updates).Error
+	err = database.DB.Model(&Subcription{}).Where("id = ? or name = ?", sub.ID, sub.Name).Updates(updates).Error
 	if err != nil {
 		return err
 	}
@@ -437,7 +452,7 @@ func GetSubcriptionByID(id int) (*Subcription, error) {
 // 抽取共用的过滤逻辑，供 GetSub 和 PreviewSub 调用
 // 返回过滤后的节点列表
 func (sub *Subcription) ApplyFilters(nodes []Node) []Node {
-	result := nodes
+	result := sub.ApplyValidationPolicy(nodes)
 
 	// 1. 延迟和速度过滤
 	if sub.DelayTime > 0 || sub.MinSpeed > 0 {
@@ -827,6 +842,9 @@ func (sub *Subcription) GetSub(clientType string) error {
 		}
 	}
 
+	sub.ValidationExcludedCount = 0
+	sub.ValidationDependencyExcludedCount = 0
+	originalNodes := append([]Node(nil), sub.Nodes...)
 	// 调用共用的过滤方法
 	sub.Nodes = sub.ApplyFilters(sub.Nodes)
 
@@ -845,6 +863,8 @@ func (sub *Subcription) GetSub(clientType string) error {
 
 	// 执行节点过滤脚本
 	sub.Nodes = sub.ApplyNodeFilterScripts(sub.Nodes, scriptsWithSort, clientType)
+	sub.Nodes = sub.ApplyValidationPolicy(sub.Nodes)
+	sub.Nodes = sub.FilterValidationDependencies(sub.Nodes, originalNodes)
 
 	return nil
 }
@@ -1155,9 +1175,14 @@ func (sub *Subcription) Del() error {
 // Copy 复制订阅及其关联数据（节点、分组、脚本）
 // 新订阅名称为：原名称_复制
 func (sub *Subcription) Copy() (*Subcription, error) {
+	policy, err := NormalizeValidationPolicy(sub.ValidationPolicy)
+	if err != nil {
+		return nil, err
+	}
 	// 创建新订阅对象，复制所有配置字段
 	newSub := &Subcription{
 		Name:                    sub.Name + "_复制",
+		ValidationPolicy:        policy,
 		Config:                  sub.Config,
 		NodeTemplateAssignments: sub.NodeTemplateAssignments,
 		ExplicitNodeIDs:         sub.ExplicitNodeIDs,
@@ -1451,9 +1476,11 @@ type PreviewNode struct {
 
 // PreviewResult 预览结果结构体
 type PreviewResult struct {
-	Nodes         []PreviewNode `json:"Nodes"`
-	TotalCount    int           `json:"TotalCount"`    // 原始节点总数
-	FilteredCount int           `json:"FilteredCount"` // 过滤后节点数
+	ValidationExcludedCount           int           `json:"ValidationExcludedCount"`
+	ValidationDependencyExcludedCount int           `json:"ValidationDependencyExcludedCount"`
+	Nodes                             []PreviewNode `json:"Nodes"`
+	TotalCount                        int           `json:"TotalCount"`    // 原始节点总数
+	FilteredCount                     int           `json:"FilteredCount"` // 过滤后节点数
 	// 用量信息
 	UsageUpload   int64 `json:"UsageUpload"`   // 已上传流量（字节）
 	UsageDownload int64 `json:"UsageDownload"` // 已下载流量（字节）
@@ -1465,15 +1492,31 @@ type PreviewResult struct {
 // 该方法调用共用的 ApplyFilters 方法应用过滤逻辑，同时应用重命名规则生成预览信息
 // 注意：调用前需要先设置 sub.Nodes 为待预览的节点列表
 func (sub *Subcription) PreviewSub() (*PreviewResult, error) {
+	return sub.previewNodes(false)
+}
+
+// PreviewPreparedSub formats nodes after shared filtering and scripts, without
+// applying pre-script filters a second time.
+func (sub *Subcription) PreviewPreparedSub() (*PreviewResult, error) {
+	return sub.previewNodes(true)
+}
+func (sub *Subcription) previewNodes(prepared bool) (*PreviewResult, error) {
 	// 记录原始节点数
 	totalCount := len(sub.Nodes)
+	originalNodes := append([]Node(nil), sub.Nodes...)
+	if !prepared {
+		sub.ValidationExcludedCount = 0
+		sub.ValidationDependencyExcludedCount = 0
+	}
 
 	// 计算用量信息
 	upload, download, total, expire := sub.CalculateUsageInfo()
 
 	// 调用共用的过滤方法（与 GetSub 共用逻辑）
-	sub.Nodes = sub.ApplyFilters(sub.Nodes)
-
+	if !prepared {
+		sub.Nodes = sub.ApplyFilters(sub.Nodes)
+		sub.Nodes = sub.FilterValidationDependencies(sub.Nodes, originalNodes)
+	}
 	// 记录过滤后的节点数
 	filteredCount := len(sub.Nodes)
 
@@ -1501,13 +1544,15 @@ func (sub *Subcription) PreviewSub() (*PreviewResult, error) {
 	}
 
 	return &PreviewResult{
-		Nodes:         previewNodes,
-		TotalCount:    totalCount,
-		FilteredCount: filteredCount,
-		UsageUpload:   upload,
-		UsageDownload: download,
-		UsageTotal:    total,
-		UsageExpire:   expire,
+		ValidationExcludedCount:           sub.ValidationExcludedCount,
+		ValidationDependencyExcludedCount: sub.ValidationDependencyExcludedCount,
+		Nodes:                             previewNodes,
+		TotalCount:                        totalCount,
+		FilteredCount:                     filteredCount,
+		UsageUpload:                       upload,
+		UsageDownload:                     download,
+		UsageTotal:                        total,
+		UsageExpire:                       expire,
 	}, nil
 }
 
@@ -1736,4 +1781,103 @@ func generateProtocolKey(link string, protoType string, fields []string) string 
 	}
 
 	return strings.Join(parts, "|")
+}
+
+// NormalizeValidationPolicy preserves legacy empty settings, rejecting unknown enums.
+func NormalizeValidationPolicy(value string) (string, error) {
+	switch value {
+	case "", "all":
+		return "all", nil
+	case "exclude_failed", "only_success":
+		return value, nil
+	}
+	return "", fmt.Errorf("invalid ValidationPolicy")
+}
+func (sub *Subcription) ApplyValidationPolicy(nodes []Node) []Node {
+	result := make([]Node, 0, len(nodes))
+	for _, n := range nodes {
+		keep := true
+		switch sub.ValidationPolicy {
+		case "exclude_failed":
+			keep = n.ValidationStatus != ValidationStatusFailed
+		case "only_success":
+			keep = n.ValidationStatus == ValidationStatusSuccess
+		case "", "all":
+		default:
+			keep = false
+		}
+		if keep {
+			result = append(result, n)
+		} else {
+			sub.ValidationExcludedCount++
+		}
+	}
+	return result
+}
+
+// FilterValidationDependencies never reintroduces excluded prerequisites or
+// silently degrades their targets to direct. Iterate to resolve transitive loss.
+func (sub *Subcription) FilterValidationDependencies(nodes, original []Node) []Node {
+	if sub.ValidationPolicy == "" || sub.ValidationPolicy == "all" {
+		return nodes
+	}
+	rules := GetEnabledChainRulesBySubscriptionID(sub.ID)
+	// Resolve removed aliases against the unfiltered plan. Rebuilding only from
+	// survivors can change $Index/$DuplicateIndex names and silently retarget a
+	// reference to a different node. Match the renderer's trimmed raw/final aliases.
+	originalNames := BuildNodeNamePlan(original, sub.NodeNamePreprocess, sub.NodeNameRule, utils.GetProtocolFromLink).NodeNameMap
+	for {
+		names := BuildNodeNamePlan(nodes, sub.NodeNamePreprocess, sub.NodeNameRule, utils.GetProtocolFromLink).NodeNameMap
+		removedAliases := make(map[string]bool)
+		for _, n := range original {
+			if _, ok := names[n.ID]; !ok {
+				for _, alias := range []string{originalNames[n.ID], n.Name, n.LinkName, n.EffectiveName()} {
+					if alias = strings.TrimSpace(alias); alias != "" {
+						removedAliases[alias] = true
+					}
+				}
+			}
+		}
+		kept := make([]Node, 0, len(nodes))
+		for _, n := range nodes {
+			unsafe := false
+			matched := false
+			for _, rule := range rules {
+				if !rule.MatchTargetCondition(n) {
+					continue
+				}
+				matched = true
+				chain, err := rule.ResolveChainLinks(nodes, names)
+				if err != nil || chain == nil || chain.FinalDialer == "" {
+					unsafe = true
+				} else {
+					for _, group := range chain.CustomGroups {
+						if len(group.Proxies) == 0 {
+							unsafe = true
+						}
+					}
+				}
+				break // First matching rule remains authoritative even if unresolved.
+			}
+			if !matched {
+				for _, alias := range strings.Split(n.DialerProxyName, ",") {
+					alias = strings.TrimSpace(alias)
+					// Even if a survivor now claims this alias, do not silently
+					// redirect an excluded prerequisite (including ambiguous raw names).
+					if alias != "" && removedAliases[alias] {
+						unsafe = true
+					}
+				}
+			}
+			if unsafe {
+				sub.ValidationDependencyExcludedCount++
+			} else {
+				kept = append(kept, n)
+			}
+		}
+		if len(kept) == len(nodes) {
+			return kept
+		}
+		nodes = kept
+	}
 }

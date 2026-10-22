@@ -13,6 +13,7 @@ func Nodes(r *gin.Engine) {
 	{
 		NodesGroup.POST("/add", api.NodeAdd)
 		NodesGroup.POST("/add-async", api.NodeAddAsync)
+		NodesGroup.POST("/revalidate", middlewares.DemoModeRestrict, api.NodeRevalidate)
 		NodesGroup.DELETE("/delete", api.NodeDel)
 		NodesGroup.DELETE("/batch-delete", api.NodeBatchDel)
 		NodesGroup.POST("/batch-update-group", api.NodeBatchUpdateGroup)

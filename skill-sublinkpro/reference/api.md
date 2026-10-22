@@ -146,19 +146,47 @@ Base: `/api/v1/nodes`
 - **Required:** `link` (one or more newline/comma-separated proxy URIs, WireGuard config text, or Clash YAML containing `proxies:`)
 - Optional: `name`, `nameMode` (`link` = use upstream name, `remark` = use custom `name`; `custom` is accepted as an alias of `remark`), `remark` (independent note for the whole node, such as source/purpose), `dialerProxyName`, `group`, `skipTLSVerify` (boolean; only affects HTTPS remote subscription links embedded as nodes; use only when the endpoint certificate cannot be verified), `tags`.
 - The final task result includes `mode`, `status` (`success|partial|skipped|invalid|failed`), counts (`added`, `skipped`, `invalid`, `failed`, optional `warnings`), safe per-item `items`, and bounded `diagnostics`. A warning means the node was saved but an auxiliary operation such as tag assignment failed, so the overall status is `partial`. Item statuses are `added|skipped|invalid|failed`; reason codes identify malformed input, unsupported protocol, network/TLS, parsing, duplicate, or persistence failures. Credential-bearing URLs and raw secrets are never returned.
-- **POST** `/nodes/add` remains available as the backward-compatible synchronous endpoint with the same form fields and structured result.
+- Inline terminal results retain at most **200 items and 32 diagnostics**, with full aggregate counts and optional `truncated`, `omittedItems`, and `omittedDiagnostics`. Progress SSE carries summary counters, not cumulative detail arrays. These limits do not cap the number of nodes processed.
+- **POST** `/nodes/add` remains available as the backward-compatible synchronous endpoint using the same form decoder/import engine. Both accept legacy `NameMode` when `nameMode` is absent. Successful sync imports return the structured result in `data`; duplicate-only sync responses preserve `data:{skipped:true,duplicateInfo,result}`. The async handler splits newline/comma batches before invoking the shared engine; do not assume identical batch splitting in the legacy sync handler.
 
 ### Update Node
 **POST** `/nodes/update` — **form**
 - Located by `oldlink` (and/or `oldname`), NOT by id.
 - Fields: `oldname`, `oldlink`, `link` (required, the new/confirmed link), `name`, `nameMode`, `remark` (independent whole-node note), `dialerProxyName`, `group`, `skipTLSVerify` (boolean; only affects HTTPS remote subscription links), `tags`.
-- Nodes expose additive validation fields: `ValidationStatus` (`untested|success|partial|failed|disabled`), `ValidationReason` (bounded safe text), and `ValidationCheckAt`. These describe import/remote-output validation and are separate from speed, delay, quality, and unlock checks.
+- Nodes expose additive validation fields: `ValidationStatus` (`untested|success|partial|failed|disabled`), `ValidationReason` (bounded safe text), and `ValidationCheckAt`. These describe structural validation and are separate from speed, delay, quality, and unlock checks. Actual changes to `Link`, `ClashExtra`, `SkipTLSVerify`, or `DialerProxyName` reset status to `untested` and clear reason/time across normal, raw, and batch updates. Metadata-only/no-op updates retain it.
 
 ### Delete Node
 **DELETE** `/nodes/delete` (query: `?id=123`)
 
+### Structural Revalidation (not a speed test)
+**POST** `/api/v1/nodes/revalidate` — **JSON**, authenticated, demo-restricted.
+
+Choose exactly one selection shape:
+```json
+{"ids":[12,18]}
+```
+```json
+{"all":true,"filters":{"validationStatus":"untested","group":"US","countries":["US"]}}
+```
+
+`ids` is mutually exclusive with the presence of either `all` or `filters` (even `all:false`). IDs must be positive and exist; duplicates are deduplicated. `all:true` requires a `filters` object; `{}` selects all. Empty selections, unknown selection/filter keys, and invalid status filters are rejected through the normal failure envelope. Filters reuse list semantics but do not accept pagination. Supported keys: `search`, `group`, `source`, `protocol`, `speedStatus`, `delayStatus`, `sortBy`, `sortOrder`, `maxDelay`, `minSpeed`, `maxFraudScore`, `countries`, `tags`, `residentialType`, `ipType`, `qualityStatus`, `validationStatus`, `unlockRuleMode`, `unlockRules`, `unlockProvider`, `unlockStatus`, `unlockKeyword`, `excludeIds`, `onlyResidential`, `onlyNative`. Country/tag/excluded-ID arrays also accept their `[]` key aliases. `unlockRules` accepts a rule array or its serialized JSON string.
+
+Response: `{code:200,msg,data:{taskId,task,total}}`. It creates a `node_revalidate` task with fixed snapshots of existing targets before execution. Result fields: `mode:"revalidate"`, `status`, `total`, `processed`, `validated`, `partial`, `skipped`, `failed`, optional `items`, `diagnostics`, `truncated`, `omittedItems`, `omittedDiagnostics`. `validated` counts existing rows updated with success/partial results; `partial` is a subset. Inline limits are 200 items/32 diagnostics with complete counters. Per-item validation statuses can be `success|partial|failed|skipped`; do not constrain these to import-only `added` statuses.
+
+Validation checks identity extraction and canonical conversion without proxy dialing, persistence in the validator, or speed/availability tests. Remote subscription rows are fetched safely and parsed: usable-only becomes `success`, mixed entries `partial`, fetch failure/no valid entries `failed`. Only existing-row validation metadata is written; remote rows are not expanded/inserted. Conditional writeback checks ID, Link, ClashExtra, SkipTLSVerify, DialerProxyName, UpdatedAt, and previous ValidationCheckAt. Editing (including edit/revert), deletion, or an already-applied overlapping result makes the stale snapshot skip. No node is recreated; cache refresh uses persisted truth.
+
+```bash
+curl -s -H "X-API-Key: $SUBLINK_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"all":true,"filters":{"validationStatus":"untested"}}' \
+  "$SUBLINK_BASE_URL/api/v1/nodes/revalidate"
+# Check the envelope code, retain data.taskId, then GET /api/v1/tasks/{id}.
+```
+
 ### Validation and subscription diagnostics
-Remote HTTPS subscription nodes are fetched during add/output using the node's `skipTLSVerify` setting. A successful validation reports the detected format and parsed/output counts through the structured add result; partial results retain valid nodes and report bounded diagnostics. During client subscription generation, partial remote fetch/parse failures are preserved in the additive `X-Subscription-Diagnostics` and `X-Subscription-Diagnostics-Count` response headers when applicable. Header values are bounded and redacted; clients that ignore these headers continue to receive the valid subscription body.
+Remote HTTPS subscription fetches during import/revalidation/output honor the relevant `skipTLSVerify` setting (not a destination-safety bypass). Manual import, output, airport roots, and providers share public-destination validation at DNS lookup/dial/each redirect, numeric-IP dialing, cross-host header clearing, a 30-second request budget, 2xx-only responses, and a 4 MiB decoded-body limit (including gzip). Private/loopback/reserved destinations and URL userinfo are rejected; there is no private-network opt-out. Ordinary HTTP/HTTPS proxy links retain their classification. Configured airport proxy downloads remain proxied; proxy initialization failure does not silently fall back to direct, and the dialer receives a checked numeric target.
+
+Partial remote output failures use bounded, safe `X-Subscription-Diagnostics` and `X-Subscription-Diagnostics-Count` headers. Policy/dependency diagnostics merge into the same maximum of eight entries; Count describes emitted diagnostics, not the full failure count. Valid output remains available to clients that ignore diagnostics. See the [feature guide](../../docs/features/node-validation.md).
 
 ### Batch Delete
 **DELETE** `/nodes/batch-delete` — **JSON** `{"ids": [1,2,3]}`
@@ -171,7 +199,9 @@ Remote HTTPS subscription nodes are fetched during add/output using the node's `
 - **POST** `/nodes/batch-fill-country` — **JSON** `{"airportId":123, "onlyEmpty":true}` fills node countries from enabled country rules by matching each node name. `airportId` is optional; when omitted, it scans all nodes. This is rule-based filling of empty/missing country values, not landing-IP detection. Use `/nodes/batch-update-country` when you already know the exact country code to set.
 
 ### List / Get Nodes
-**GET** `/nodes/get` — query filters (all lowerCamel): `search`, `group`, `source`, `protocol`, `maxDelay`, `minSpeed`, `sortBy`, `sortOrder`, `page`, `pageSize`, array filters `countries[]`, `tags[]`. Returns `{items, total, page, pageSize, totalPages}` when paginated.
+**GET** `/nodes/get` — query filters (all lowerCamel): `search`, `group`, `source`, `protocol`, `validationStatus`, `maxDelay`, `minSpeed`, `sortBy`, `sortOrder`, `page`, `pageSize`, array filters `countries[]`, `tags[]`. Returns `{items, total, page, pageSize, totalPages}` when paginated.
+
+`validationStatus` accepts `untested|success|partial|failed|disabled`; empty/`all` means unrestricted. Unknown values fail on list, selector, and ID-list queries. Historical empty status is treated as untested. Validation-status sorting uses `sortBy=validation`.
 
 ### Node Selector (compact picker list)
 **GET** `/nodes/selector` — same query filters as `/nodes/get`; returns `{items:[{ID, Name, Group, Source, LinkCountry, ...}], total, ...}`. Use this to present nodes as a numbered pick list.
@@ -209,9 +239,24 @@ Base: `/api/v1/subcription` (note the spelling — missing the second "s").
 - **Required:** `name` AND at least one of `nodeIds` (comma-separated node IDs), `groups` (comma-separated group names), or `airports` (comma-separated airport IDs).
 - Output template: `config` = a template **filename** (the `file` value from `GET /template/get`, e.g. `clash.yaml`); empty = raw node list.
 - Other optional form fields (UpperCamel unless noted): `airports` (comma-separated airport IDs), `scripts` (comma-separated script IDs), `IPWhitelist`, `IPBlacklist`, `DelayTime`, `MinSpeed`, `CountryWhitelist`, `CountryBlacklist`, `NodeNameRule`, `NodeNamePreprocess`, `NodeNameWhitelist`, `NodeNameBlacklist`, `TagWhitelist`, `TagBlacklist`, `ProtocolWhitelist`, `ProtocolBlacklist`, `DeduplicationRule`, `RefreshUsageOnRequest`, `UpdateInterval`, `MaxFraudScore`, `OnlyResidential`, `OnlyNative`, `ResidentialType`, `IPType`, `QualityStatus`, `UnlockProvider`, `UnlockStatus`, `UnlockKeyword`, `UnlockRules`, `UnlockRuleMode`.
-- `nodeTemplateAssignments` (optional JSON object): maps selected node IDs to one or more proxy-group names in the selected Clash template, for example `{"12":["🇭🇰 香港节点","🚀 节点选择"],"18":["🇯🇵 日本节点"]}`. For backward compatibility, a single string value is also accepted. In the UI, newly added explicit nodes are initially assigned to all ordinary groups so they can be removed from selected groups as needed. When `config.nodeTemplateAssignmentsEnabled` is `true`, node membership is materialized from assignments without dynamic `include-all`/provider collection, preventing duplicate entries; existing references to other proxy groups are preserved. With the option disabled and assignments cleared, the template's legacy membership behavior is preserved. Invalid or missing group names are ignored during output generation. On update, send `{}` to explicitly clear all assignments; omitting the field preserves the existing assignments.
+- `nodeTemplateAssignments` (optional JSON object): maps selected node IDs to one or more proxy-group names in the selected Clash template, for example `{"12":["🇭🇰 香港节点","🚀 节点选择"],"18":["🇯🇵 日本节点"]}`. For backward compatibility, a single string value is also accepted. In the UI, selecting nodes or enabling custom assignments does not automatically assign nodes to any group. Group membership must be selected explicitly; toggling this option preserves existing assignments. When `config.nodeTemplateAssignmentsEnabled` is `true`, node membership is materialized from assignments without dynamic `include-all`/provider collection, preventing duplicate entries; existing references to other proxy groups are preserved. With the option disabled and assignments cleared, the template's legacy membership behavior is preserved. Invalid or missing group names are ignored during output generation. On update, send `{}` to explicitly clear all assignments; omitting the field preserves the existing assignments.
 - `explicitNodeIds` (optional comma-separated node IDs): records which nodes the user selected directly before front/dialer dependencies were expanded. It preserves explicit root selection when editing subscriptions that contain nodes also used as front proxies. The `config` JSON may include `nodeTemplateAssignmentsEnabled` (boolean); new subscriptions default to `false`.
 - Name must be unique (duplicate → `订阅名称不能重复`).
+
+### Validation Policy
+Form field **`ValidationPolicy`** (exact casing) is accepted by add/update and returned on subscriptions.
+
+| Value | Effect on stored rows |
+|:---|:---|
+| `all` (default) | Keep every status, including legacy empty |
+| `exclude_failed` | Exclude only `failed`; retain untested/partial/disabled |
+| `only_success` | Keep only `success` |
+
+Missing/empty input normalizes to `all`, including on update (send the current strict value explicitly to preserve it). Unknown values return HTTP 400 with body `code:400`. Legacy NULL/empty database values migrate to `all` idempotently; copy and cache retain explicit policies.
+
+Policy runs with ordinary filters before node-filter scripts and again after scripts. Shared preparation covers saved/form preview, native output, Sub-Store conversion, and share consumption. It consumes persisted row status, not live reachability or validation of every expanded remote child; output scripts/sidecar remain trusted transformations. Under non-`all` policies, excluded/unresolved chain prerequisites cause dependent targets to be omitted (including transitive dialers), not downgraded to direct/lower-priority rules and not reintroduced. `all` preserves legacy chain behavior. All-excluded output does not fall back to all nodes, though template envelopes may remain. Existing synthetic invalid/expired share notice nodes are added afterwards and exempt.
+
+Regular rendered responses (including HEAD) include `X-Subscription-Validation-Excluded` and `X-Subscription-Validation-Dependency-Excluded`. Preview exposes the corresponding `ValidationExcludedCount` and `ValidationDependencyExcludedCount`. Safe policy/dependency diagnostics join the bounded diagnostic headers described above.
 
 ### Update Subscription
 **POST** `/subcription/update` — **form**, located by `oldname` (current name). Same field set as add, plus `oldname`.
@@ -241,6 +286,7 @@ Base: `/api/v1/subcription` (note the spelling — missing the second "s").
   "AirportIDs": [10], "AirportSorts": [2],
   "Scripts": [1],
   "DelayTime": 300, "MinSpeed": 5,
+  "ValidationPolicy": "only_success",
   "CountryWhitelist": "", "CountryBlacklist": "",
   "TagWhitelist": "", "TagBlacklist": "",
   "ProtocolWhitelist": "", "ProtocolBlacklist": "",
@@ -251,6 +297,8 @@ Base: `/api/v1/subcription` (note the spelling — missing the second "s").
   "UnlockRules": "", "UnlockRuleMode": ""
 }
 ```
+
+For saved preview, send `{"SubscriptionID":123}`; it uses the saved policy, not a form override. For an unsaved preview, omit `SubscriptionID` and send form fields including `ValidationPolicy`. Missing/empty form policy defaults to `all`; unknown enum returns HTTP 400. Response data includes `ValidationExcludedCount` and `ValidationDependencyExcludedCount` in addition to existing preview counts/items.
 
 ### Metadata helpers
 - **GET** `/subcription/protocol-meta`
@@ -284,6 +332,8 @@ Base: `/api/v1/shares`
 
 ### Get Shares (for a subscription)
 **GET** `/shares/get` (query: `?subId=123`) — `subId` is **required**. Optional paginated filters: `page`, `pageSize`, `keyword`, `ipFilter`, `sortBy`, `sortOrder`. `sortBy` accepts `access_count` or natural numeric-aware `name`; `sortOrder` accepts `asc` or `desc`.
+
+The subscription-management UI's first action copies an auto-detect `/c/?token=...` link without `client`. It prefers an enabled, unexpired default (`is_legacy`) share, otherwise the first available share; no available share prompts share management and does not create one. The configured system domain takes precedence over the production page origin. This reuses existing share/settings endpoints; no API contract changes.
 
 ### Add Share
 **POST** `/shares/add` — **JSON**
@@ -643,6 +693,12 @@ Base: `/api/v1/tasks`
 - **DELETE** `/tasks` — **JSON** body for clearing history
 
 ---
+
+Task types include `node_add` and `node_revalidate`. Task details/list include `total`, `result`, `message`, and `completedAt` with current progress; persisted `result` is JSON text, whereas SSE may carry an object. Parse defensively. A task reaching `completed` does not mean every row succeeded: inspect result counters/status.
+
+Browser refresh/navigation does not cancel server work. After authentication the web UI hydrates `/tasks/running`, reconciles known active IDs via `/tasks/{id}`, and schedules a single next poll five seconds after the previous round completes; SSE shares the same normalization and bounded terminal deduplication. Recently completed tasks may no longer appear in `/running`; use task history/details for results.
+
+On server startup, persisted pending/running tasks become `error` with completion timestamp and refreshed cache; they do **not** resume or retry automatically. `/tasks/{id}/stop` is cooperative cancellation without rollback. The last processed summary is retained in memory and persisted on cancellation for partial-result review, without per-item database writes; full item arrays are not promised on cancellation. Nil progress summaries do not erase existing summaries. Terminal persistence failure is surfaced as error; database outage cannot guarantee durability. Progress SSE sends summaries; terminal inline details are bounded to 200 items/32 diagnostics with complete counts and truncation metadata.
 
 ## Node Check (speed test / unlock check)
 

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"sort"
 	"strings"
@@ -40,6 +39,7 @@ type PreviewRequest struct {
 	OnlyNative         bool     `json:"OnlyNative"`        // 仅原生IP
 	ResidentialType    string   `json:"ResidentialType"`   // 住宅属性过滤
 	IPType             string   `json:"IPType"`            // IP类型过滤
+	ValidationPolicy   string   `json:"ValidationPolicy"`
 	QualityStatus      string   `json:"QualityStatus"`
 	UnlockProvider     string   `json:"UnlockProvider"`
 	UnlockStatus       string   `json:"UnlockStatus"`
@@ -66,6 +66,12 @@ func PreviewSubscriptionNodes(c *gin.Context) {
 		return
 	}
 
+	policy, policyErr := models.NormalizeValidationPolicy(req.ValidationPolicy)
+	if policyErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid ValidationPolicy"})
+		return
+	}
+	req.ValidationPolicy = policy
 	var result *models.PreviewResult
 	var err error
 
@@ -138,13 +144,15 @@ func previewSavedSubscription(subID int) (*models.PreviewResult, error) {
 	}
 
 	return &models.PreviewResult{
-		Nodes:         previewNodes,
-		TotalCount:    totalCount,
-		FilteredCount: filteredCount,
-		UsageUpload:   upload,
-		UsageDownload: download,
-		UsageTotal:    total,
-		UsageExpire:   expire,
+		ValidationExcludedCount:           sub.ValidationExcludedCount,
+		ValidationDependencyExcludedCount: sub.ValidationDependencyExcludedCount,
+		Nodes:                             previewNodes,
+		TotalCount:                        totalCount,
+		FilteredCount:                     filteredCount,
+		UsageUpload:                       upload,
+		UsageDownload:                     download,
+		UsageTotal:                        total,
+		UsageExpire:                       expire,
 	}, nil
 }
 
@@ -167,6 +175,7 @@ func previewFormSubscription(req PreviewRequest) (*models.PreviewResult, error) 
 		OnlyNative:         req.OnlyNative,
 		ResidentialType:    req.ResidentialType,
 		IPType:             req.IPType,
+		ValidationPolicy:   req.ValidationPolicy,
 		QualityStatus:      req.QualityStatus,
 		UnlockProvider:     models.NormalizeUnlockProvider(req.UnlockProvider),
 		UnlockStatus:       strings.TrimSpace(req.UnlockStatus),
@@ -188,38 +197,25 @@ func previewFormSubscription(req PreviewRequest) (*models.PreviewResult, error) 
 	// 使用与 GetSub 相同的混合排序逻辑构建节点列表
 	allNodes := buildNodesWithMixedSort(req)
 	totalCount := len(allNodes)
+	originalNodes := append([]models.Node(nil), allNodes...)
+	allNodes = tempSub.ApplyFilters(allNodes)
 
-	// 应用脚本处理（filterNode 脚本）
-	if len(req.Scripts) > 0 && len(allNodes) > 0 {
-		for _, scriptID := range req.Scripts {
-			var script models.Script
-			if err := database.DB.Where("id = ?", scriptID).First(&script).Error; err != nil {
-				continue // 跳过不存在的脚本
-			}
-
-			nodesJSON, err := json.Marshal(allNodes)
-			if err != nil {
-				continue
-			}
-
-			resultJSON, err := utils.RunNodeFilterScript(script.Content, nodesJSON, "preview")
-			if err != nil {
-				continue
-			}
-
-			var processedNodes []models.Node
-			if err := json.Unmarshal(resultJSON, &processedNodes); err != nil {
-				continue
-			}
-
-			allNodes = processedNodes
+	// Use the same script adapter and ordering as GetSub (including runtime names).
+	scripts := make([]models.ScriptWithSort, 0, len(req.Scripts))
+	for _, id := range req.Scripts {
+		var script models.Script
+		if err := database.DB.First(&script, id).Error; err == nil {
+			scripts = append(scripts, models.ScriptWithSort{Script: script})
 		}
 	}
+	allNodes = tempSub.ApplyNodeFilterScripts(allNodes, scripts, "preview")
 
+	allNodes = tempSub.ApplyValidationPolicy(allNodes)
+	allNodes = tempSub.FilterValidationDependencies(allNodes, originalNodes)
 	tempSub.Nodes = allNodes
 
 	// 调用 PreviewSub 方法获取预览结果（包含过滤和重命名）
-	result, err := tempSub.PreviewSub()
+	result, err := tempSub.PreviewPreparedSub()
 	if err != nil {
 		return nil, err
 	}

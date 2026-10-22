@@ -31,6 +31,9 @@ import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
+import LinkIcon from '@mui/icons-material/Link';
+import Tooltip from '@mui/material/Tooltip';
+import CircularProgress from '@mui/material/CircularProgress';
 import { getSubscriptionNameChipSx } from './subscriptionNameChipStyles';
 import useResolvedColorScheme from 'hooks/useResolvedColorScheme';
 import { getReadableTextTokens, getSurfaceTokens } from 'themes/surfaceTokens';
@@ -49,6 +52,8 @@ export default function SubscriptionMobileCard({
   onEdit,
   onDelete,
   onCopy,
+  onCopySubscriptionLink,
+  quickCopyingSubId,
   onPreview,
   onChainProxy,
   onStartSort,
@@ -325,12 +330,28 @@ export default function SubscriptionMobileCard({
                         </Button>
                       </Stack>
                     ) : (
-                      <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
                         <Typography variant="caption" sx={{ color: tertiaryText, fontWeight: 500 }}>
                           {sub.CreateDate}
                         </Typography>
 
-                        <Stack direction="row" spacing={0.75} alignItems="center">
+                        <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                          <Tooltip title={t('subscriptions.table.tooltips.copyAutoLink')}>
+                            <span>
+                              <IconButton
+                                size="medium"
+                                aria-label={t('subscriptions.table.tooltips.copyAutoLink')}
+                                disabled={quickCopyingSubId !== null}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onCopySubscriptionLink(sub);
+                                }}
+                                sx={getActionIconSx(palette.primary.main)}
+                              >
+                                {quickCopyingSubId === sub.ID ? <CircularProgress size={24} color="inherit" /> : <LinkIcon />}
+                              </IconButton>
+                            </span>
+                          </Tooltip>
                           <IconButton
                             size="medium"
                             onClick={(e) => {

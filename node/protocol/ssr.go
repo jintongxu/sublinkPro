@@ -85,19 +85,12 @@ func DecodeSSRURL(s string) (Ssr, error) {
 		query := strings.Split(s, "/?")[1]
 		s = strings.Replace(s, "/?"+query, "", 1)
 		paramMap := make(map[string]string)
-		if strings.Contains(query, "&") {
-			params := strings.Split(query, "&")
-			for _, param := range params {
-				parts := strings.SplitN(param, "=", 2)
-				if len(parts) != 2 {
-					fmt.Println("Invalid parameter: ", param)
-					continue
-				}
-				paramMap[parts[0]] = parts[1]
+		for _, param := range strings.Split(query, "&") {
+			parts := strings.SplitN(param, "=", 2)
+			if len(parts) != 2 {
+				return Ssr{}, errors.New("invalid SSR query parameter")
 			}
-		} else {
-			q := strings.Split(query, "=")
-			paramMap[q[0]] = q[1]
+			paramMap[parts[0]] = parts[1]
 		}
 		remarks = utils.Base64Decode(paramMap["remarks"])
 		obfsparam = utils.Base64Decode(paramMap["obfsparam"])

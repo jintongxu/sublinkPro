@@ -33,6 +33,7 @@ import {
   getNodes,
   getNodeIds,
   addNodesAsync,
+  revalidateNodes,
   updateNode,
   deleteNode,
   deleteNodesBatch,
@@ -197,6 +198,7 @@ export default function NodeList() {
   const [residentialType, setResidentialType] = useState('');
   const [ipType, setIpType] = useState('');
   const [qualityStatus, setQualityStatus] = useState('');
+  const [validationStatus, setValidationStatus] = useState('');
   const [unlockRules, setUnlockRules] = useState([]);
   const [unlockRuleMode, setUnlockRuleMode] = useState('or');
 
@@ -339,6 +341,7 @@ export default function NodeList() {
         if (filterParams.residentialType) params.residentialType = filterParams.residentialType;
         if (filterParams.ipType) params.ipType = filterParams.ipType;
         if (filterParams.qualityStatus) params.qualityStatus = filterParams.qualityStatus;
+        if (filterParams.validationStatus) params.validationStatus = filterParams.validationStatus;
         if (filterParams.unlockRules?.some((rule) => rule.provider || rule.status || rule.keyword)) {
           params.unlockRules = buildUnlockRulesPayload(filterParams.unlockRules);
           params.unlockRuleMode = filterParams.unlockRuleMode || 'or';
@@ -391,18 +394,21 @@ export default function NodeList() {
   }, [proxyNodeOptions.length]);
 
   // 详情面板需要跨分页查找前置代理引用关系，因此按需加载完整节点列表。
-  const fetchReferenceNodes = useCallback(async (force = false) => {
-    if (!force && referenceNodes.length > 0) return;
-    setLoadingReferenceNodes(true);
-    try {
-      const response = await getNodes({});
-      setReferenceNodes(response.data || []);
-    } catch (error) {
-      console.error('获取前置代理引用关系失败:', error);
-    } finally {
-      setLoadingReferenceNodes(false);
-    }
-  }, [referenceNodes.length]);
+  const fetchReferenceNodes = useCallback(
+    async (force = false) => {
+      if (!force && referenceNodes.length > 0) return;
+      setLoadingReferenceNodes(true);
+      try {
+        const response = await getNodes({});
+        setReferenceNodes(response.data || []);
+      } catch (error) {
+        console.error('获取前置代理引用关系失败:', error);
+      } finally {
+        setLoadingReferenceNodes(false);
+      }
+    },
+    [referenceNodes.length]
+  );
 
   const openNodeDetails = useCallback(
     (node) => {
@@ -498,6 +504,7 @@ export default function NodeList() {
         residentialType: residentialType,
         ipType: ipType,
         qualityStatus: qualityStatus,
+        validationStatus: validationStatus,
         unlockRules: unlockRules,
         unlockRuleMode: unlockRuleMode,
         countries: countryFilter,
@@ -530,6 +537,7 @@ export default function NodeList() {
     residentialType,
     ipType,
     qualityStatus,
+    validationStatus,
     unlockRules,
     unlockRuleMode,
     countryFilter,
@@ -564,6 +572,7 @@ export default function NodeList() {
     setResidentialType('');
     setIpType('');
     setQualityStatus('');
+    setValidationStatus('');
     setUnlockRules([]);
     setUnlockRuleMode('or');
     setSortBy('');
@@ -583,6 +592,7 @@ export default function NodeList() {
     residentialType: residentialType,
     ipType: ipType,
     qualityStatus: qualityStatus,
+    validationStatus: validationStatus,
     unlockRules: unlockRules,
     unlockRuleMode: unlockRuleMode,
     countries: countryFilter,
@@ -607,6 +617,7 @@ export default function NodeList() {
     if (filters.residentialType) params.residentialType = filters.residentialType;
     if (filters.ipType) params.ipType = filters.ipType;
     if (filters.qualityStatus) params.qualityStatus = filters.qualityStatus;
+    if (filters.validationStatus) params.validationStatus = filters.validationStatus;
     if (filters.unlockRules?.some((rule) => rule.provider || rule.status || rule.keyword)) {
       params.unlockRules = buildUnlockRulesPayload(filters.unlockRules);
       params.unlockRuleMode = filters.unlockRuleMode || 'or';
@@ -689,6 +700,7 @@ export default function NodeList() {
     residentialType,
     ipType,
     qualityStatus,
+    validationStatus,
     detailsPanelOpen,
     fetchReferenceNodes,
     unlockRules,
@@ -703,7 +715,10 @@ export default function NodeList() {
   useEffect(() => {
     const onTaskComplete = ({ taskType, status, result }) => {
       // 当测速、订阅更新或节点添加任务完成时，自动刷新列表。
-      if (status === 'completed' && (taskType === 'speed_test' || taskType === 'sub_update' || taskType === 'node_add')) {
+      if (
+        ['completed', 'cancelled', 'error'].includes(status) &&
+        (taskType === 'speed_test' || taskType === 'sub_update' || taskType === 'node_add' || taskType === 'node_revalidate')
+      ) {
         handleRefresh();
       }
       if (taskType === 'node_add' && status === 'completed' && result) {
@@ -721,7 +736,17 @@ export default function NodeList() {
   const handleAddNode = () => {
     setIsEditNode(false);
     setCurrentNode(null);
-    setNodeForm({ name: '', remark: '', nameMode: 'link', link: '', dialerProxyName: '', group: '', skipTLSVerify: false, mergeMode: '2', tags: [] });
+    setNodeForm({
+      name: '',
+      remark: '',
+      nameMode: 'link',
+      link: '',
+      dialerProxyName: '',
+      group: '',
+      skipTLSVerify: false,
+      mergeMode: '2',
+      tags: []
+    });
     setNodeDialogOpen(true);
   };
 
@@ -779,6 +804,43 @@ export default function NodeList() {
         showMessage(error.message || t('nodes.page.messages.deleteFailed'), 'error');
       }
     });
+  };
+
+  const handleRevalidate = async (all = false) => {
+    try {
+      const filters = buildNodeListParams(getCurrentFilters());
+      const ids = selectedNodes.map((node) => node.ID);
+      let count = ids.length;
+      if (all) {
+        const response = await getNodeIds(filters);
+        count = (response.data || []).length;
+      }
+      if (!count) {
+        showMessage(t('nodes.validation.empty'), 'warning');
+        return;
+      }
+      openConfirm(t('nodes.validation.title'), t('nodes.validation.confirm', { count }), async () => {
+        try {
+          const response = await revalidateNodes(all ? { all: true, filters } : { ids });
+          const task = response.data?.task;
+          if (!task?.id) throw new Error(t('nodes.validation.failed'));
+          updateTask(task.id, {
+            taskId: task.id,
+            taskType: 'node_revalidate',
+            taskName: task.name,
+            status: task.status,
+            current: task.progress || 0,
+            total: task.total,
+            startTime: task.startedAt ? new Date(task.startedAt).getTime() : Date.now()
+          });
+          showMessage(t('nodes.validation.started'));
+        } catch (error) {
+          showMessage(error.message || t('nodes.validation.failed'), 'error');
+        }
+      });
+    } catch (error) {
+      showMessage(error.message || t('nodes.validation.failed'), 'error');
+    }
   };
 
   const handleBatchDelete = async () => {
@@ -1163,6 +1225,7 @@ export default function NodeList() {
         if (filters.residentialType) params.residentialType = filters.residentialType;
         if (filters.ipType) params.ipType = filters.ipType;
         if (filters.qualityStatus) params.qualityStatus = filters.qualityStatus;
+        if (filters.validationStatus) params.validationStatus = filters.validationStatus;
         if (filters.unlockRules?.some((rule) => rule.provider || rule.status || rule.keyword)) {
           params.unlockRules = buildUnlockRulesPayload(filters.unlockRules);
           params.unlockRuleMode = filters.unlockRuleMode || 'or';
@@ -1347,6 +1410,8 @@ export default function NodeList() {
         setResidentialType={setResidentialType}
         ipType={ipType}
         setIpType={setIpType}
+        validationStatus={validationStatus}
+        setValidationStatus={setValidationStatus}
         qualityStatus={qualityStatus}
         setQualityStatus={setQualityStatus}
         unlockRules={unlockRules}
@@ -1373,6 +1438,8 @@ export default function NodeList() {
         totalCount={totalItems}
         onSelectAll={handleSelectAll}
         onClearSelection={() => setSelectedNodes([])}
+        onRevalidate={() => handleRevalidate(false)}
+        onRevalidateAll={() => handleRevalidate(true)}
         onDelete={handleBatchDelete}
         onGroup={handleBatchGroup}
         onSource={handleBatchSource}

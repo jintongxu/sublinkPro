@@ -20,6 +20,12 @@ The new subscription share management feature replaces the old single Token mode
 
 ---
 
+## Quick Copy from Subscription Management
+
+The first action on each desktop row or mobile card copies an **auto-detect** subscription link, separately from copying the subscription configuration. It prefers the enabled, unexpired default share, then the first available share. If none is available, it prompts you to manage shares instead of creating one automatically.
+
+The link contains only the share token, with no `client` override. It uses the configured system domain when present; otherwise production uses the current page origin. Treat copied links as credentials and share them only with intended recipients.
+
 ## ⏰ Expiration Policies
 
 | Policy | Description |

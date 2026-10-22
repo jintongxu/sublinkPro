@@ -60,11 +60,12 @@ English | [简体中文](README.zh-CN.md)
 |:---|:---|:---:|
 | 🏷️ **Smart tag system** | Automatic rule based tagging, no code filtering, IP quality conditions | [📖](docs/features/tags.md) |
 | ⚡ **Professional speed test system** | Two stage tests, smart latency measurement, IP quality and unlock checks | [📖](docs/features/speedtest.md) |
+| 🔎 **Structural validation** | Snapshot-safe node revalidation, recoverable task observation, subscription status policies (not speed tests) | [📖](docs/features/node-validation.md) |
 | 🔗 **Chain proxy** | Native Dialer-Proxy support, visual configuration, IP quality based node selection | [📖](docs/features/chain-proxy.md) |
 | 🤖 **AI template editing** | Generate operation based previews from natural language, review read-only diffs, accept into the editor, then save normally | [📖](docs/features/template-ai.md) |
 | ✈️ **Airport management** | Multi format import, scheduled updates, traffic monitoring, one click full refresh | [📖](docs/features/airport.md) |
 | 🗂️ **Group ordering** | Drag airport priority within a group to control node order in subscription output | [📖](docs/development.md) |
-| 📋 **Subscription sharing** | Multiple links, expiration policies, access statistics | [📖](docs/features/subscription-share.md) |
+| 📋 **Subscription sharing** | Quick-copy auto-detect links, multiple links, expiration policies, access statistics | [📖](docs/features/subscription-share.md) |
 | 🌐 **Host management** | Domain mappings, DNS configuration, CDN preferred IPs | [📖](docs/features/host.md) |
 | ☁️ **Cloudflare Tunnel** | Expose the admin UI without a public IP, with cloudflared managed from the page | [📖](docs/features/cloudflare-tunnel.md) |
 | 💾 **WebDAV backup** | Encrypt WebDAV credentials, upload system backups on demand or by cron, list remote ZIP files, and restore from the page | [📖](docs/features/backup.md) |
@@ -160,6 +161,7 @@ If your earlier instance used SQLite and you now want to migrate to MySQL or Pos
 |:---|:---|
 | [🏷️ Smart tag system](docs/features/tags.md) | Automatic rule based tagging, no code filtering, IP quality rules |
 | [⚡ Speed test system](docs/features/speedtest.md) | Test design, IP quality checks, unlock checks, parameter tuning |
+| [🔎 Node structural validation](docs/features/node-validation.md) | Import compatibility, task recovery, revalidation, subscription policies and fetch safety |
 | [🌍 Unlock checks](docs/features/unlock-check.md) | Streaming and AI availability checks, Provider architecture, extensions |
 | [🔗 Chain proxy](docs/features/chain-proxy.md) | Dialer-Proxy, condition based node selection, configuration flow |
 | [🤖 AI template editing](docs/features/template-ai.md) | Operation based previews, read-only diff review, accept into editor, normal save |

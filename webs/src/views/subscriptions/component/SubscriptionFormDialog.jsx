@@ -73,22 +73,6 @@ import {
 
 const normalizeCountryCode = (value) => (typeof value === 'string' ? value.trim().toUpperCase() : '');
 
-const assignNewNodesToAllGroups = (assignments, existingNodeIds, nodeIds, groupNames) => {
-  const next = { ...(assignments || {}) };
-  const existingIds = new Set((existingNodeIds || []).map(Number));
-  const groups = Array.from(new Set((groupNames || []).map((name) => String(name).trim()).filter(Boolean)));
-
-  (nodeIds || []).forEach((nodeId) => {
-    const normalizedID = Number(nodeId);
-    if (!Number.isInteger(normalizedID) || normalizedID <= 0 || existingIds.has(normalizedID)) return;
-    const key = String(normalizedID);
-    const current = Array.isArray(next[key]) ? next[key] : next[key] ? [next[key]] : [];
-    if (current.length === 0 && groups.length > 0) next[key] = groups;
-  });
-
-  return next;
-};
-
 const normalizeCountryCodeList = (values) => {
   if (!Array.isArray(values)) return [];
   return Array.from(new Set(values.map((value) => normalizeCountryCode(value)).filter(Boolean)));
@@ -204,10 +188,12 @@ export default function SubscriptionFormDialog({
   const selectedClashTemplate = useMemo(() => {
     const selectedPath = formData.clash || '';
     const selectedFile = selectedPath.split(/[\\/]/).pop();
-    return clashTemplates.find((template) => {
-      const file = template.file || template.File || template.filename || template.name || template.Name;
-      return file === selectedFile;
-    }) || clashTemplates[0];
+    return (
+      clashTemplates.find((template) => {
+        const file = template.file || template.File || template.filename || template.name || template.Name;
+        return file === selectedFile;
+      }) || clashTemplates[0]
+    );
   }, [clashTemplates, formData.clash]);
 
   const clashProxyGroupMetadata = useMemo(() => {
@@ -243,13 +229,23 @@ export default function SubscriptionFormDialog({
       const nameMatch = line.match(/^\s*-\s+name\s*:\s*(.*?)\s*$/);
       if (nameMatch) {
         flushGroup();
-        currentGroup = { name: nameMatch[1].trim().replace(/^(['"])(.*)\1$/, '$2').trim(), type: '', references: {} };
+        currentGroup = {
+          name: nameMatch[1]
+            .trim()
+            .replace(/^(['"])(.*)\1$/, '$2')
+            .trim(),
+          type: '',
+          references: {}
+        };
         continue;
       }
       if (!currentGroup) continue;
       const typeMatch = line.match(/^\s+type\s*:\s*(.*?)\s*$/);
       if (typeMatch) {
-        currentGroup.type = typeMatch[1].trim().replace(/^(['"])(.*)\1$/, '$2').trim();
+        currentGroup.type = typeMatch[1]
+          .trim()
+          .replace(/^(['"])(.*)\1$/, '$2')
+          .trim();
         continue;
       }
       const referenceMatch = line.match(/^\s+(include-all(?:-proxies|-providers)?|use|filter|exclude-filter|exclude-type)\s*:\s*(.*?)\s*$/);
@@ -263,65 +259,68 @@ export default function SubscriptionFormDialog({
     return groups;
   }, [selectedClashTemplate]);
 
-  const clashProxyGroupOptions = useMemo(
-    () => clashProxyGroupMetadata.map((group) => group.name),
-    [clashProxyGroupMetadata]
-  );
-
   const chainProxyGroupTargets = useMemo(() => {
     const targets = new Map();
-    const nodeNames = new Map((selectedNodesList || []).map((node) => [Number(node.ID), node.Name || node.EffectiveName || `节点 #${node.ID}`]));
+    const nodeNames = new Map(
+      (selectedNodesList || []).map((node) => [Number(node.ID), node.Name || node.EffectiveName || `节点 #${node.ID}`])
+    );
     const addTarget = (groupName, target) => {
       if (!groupName || !target) return;
       const values = targets.get(groupName) || new Set();
       values.add(target);
       targets.set(groupName, values);
     };
-    chainRules.filter((rule) => rule.enabled !== false).forEach((rule) => {
-      try {
-        const chain = typeof rule.chainConfig === 'string' ? JSON.parse(rule.chainConfig) : rule.chainConfig;
-        const target = typeof rule.targetConfig === 'string' ? JSON.parse(rule.targetConfig) : rule.targetConfig;
-        const sourceGroups = (Array.isArray(chain) ? chain : [])
-          .filter((item) => item?.type === 'template_group' && item.groupName)
-          .map((item) => item.groupName);
-        const targetText = target?.type === 'template_group'
-          ? target.groupName
-          : target?.nodeId
-            ? nodeNames.get(Number(target.nodeId)) || `节点 #${target.nodeId}`
-            : target?.nodeIds?.length
-              ? target.nodeIds.map((id) => nodeNames.get(Number(id)) || `节点 #${id}`).join('、')
-              : target?.type || '目标';
-        sourceGroups.forEach((groupName) => addTarget(groupName, targetText));
-      } catch {
-        // Ignore malformed legacy rules; the chain dialog remains the source of truth.
-      }
-    });
+    chainRules
+      .filter((rule) => rule.enabled !== false)
+      .forEach((rule) => {
+        try {
+          const chain = typeof rule.chainConfig === 'string' ? JSON.parse(rule.chainConfig) : rule.chainConfig;
+          const target = typeof rule.targetConfig === 'string' ? JSON.parse(rule.targetConfig) : rule.targetConfig;
+          const sourceGroups = (Array.isArray(chain) ? chain : [])
+            .filter((item) => item?.type === 'template_group' && item.groupName)
+            .map((item) => item.groupName);
+          const targetText =
+            target?.type === 'template_group'
+              ? target.groupName
+              : target?.nodeId
+                ? nodeNames.get(Number(target.nodeId)) || `节点 #${target.nodeId}`
+                : target?.nodeIds?.length
+                  ? target.nodeIds.map((id) => nodeNames.get(Number(id)) || `节点 #${id}`).join('、')
+                  : target?.type || '目标';
+          sourceGroups.forEach((groupName) => addTarget(groupName, targetText));
+        } catch {
+          // Ignore malformed legacy rules; the chain dialog remains the source of truth.
+        }
+      });
     return targets;
   }, [chainRules, selectedNodesList]);
 
   const chainTargetNodeGroups = useMemo(() => {
     const groupsByNode = new Map();
-    chainRules.filter((rule) => rule.enabled !== false).forEach((rule) => {
-      try {
-        const chain = typeof rule.chainConfig === 'string' ? JSON.parse(rule.chainConfig) : rule.chainConfig;
-        const target = typeof rule.targetConfig === 'string' ? JSON.parse(rule.targetConfig) : rule.targetConfig;
-        const sourceGroups = (Array.isArray(chain) ? chain : [])
-          .filter((item) => item?.type === 'template_group' && item.groupName)
-          .map((item) => item.groupName);
-        const targetIds = target?.type === 'specified_node' && target.nodeId
-          ? [target.nodeId]
-          : target?.type === 'specified_nodes' && Array.isArray(target.nodeIds)
-            ? target.nodeIds
-            : [];
-        targetIds.forEach((nodeId) => {
-          const values = groupsByNode.get(Number(nodeId)) || new Set();
-          sourceGroups.forEach((groupName) => values.add(groupName));
-          groupsByNode.set(Number(nodeId), values);
-        });
-      } catch {
-        // Ignore malformed legacy rules.
-      }
-    });
+    chainRules
+      .filter((rule) => rule.enabled !== false)
+      .forEach((rule) => {
+        try {
+          const chain = typeof rule.chainConfig === 'string' ? JSON.parse(rule.chainConfig) : rule.chainConfig;
+          const target = typeof rule.targetConfig === 'string' ? JSON.parse(rule.targetConfig) : rule.targetConfig;
+          const sourceGroups = (Array.isArray(chain) ? chain : [])
+            .filter((item) => item?.type === 'template_group' && item.groupName)
+            .map((item) => item.groupName);
+          const targetIds =
+            target?.type === 'specified_node' && target.nodeId
+              ? [target.nodeId]
+              : target?.type === 'specified_nodes' && Array.isArray(target.nodeIds)
+                ? target.nodeIds
+                : [];
+          targetIds.forEach((nodeId) => {
+            const values = groupsByNode.get(Number(nodeId)) || new Set();
+            sourceGroups.forEach((groupName) => values.add(groupName));
+            groupsByNode.set(Number(nodeId), values);
+          });
+        } catch {
+          // Ignore malformed legacy rules.
+        }
+      });
     return groupsByNode;
   }, [chainRules]);
 
@@ -467,6 +466,7 @@ export default function SubscriptionFormDialog({
     if (formData.nodeNameBlacklist) count++;
     if (formData.MaxFraudScore > 0) count++;
     if (formData.QualityStatus) count++;
+    if (formData.ValidationPolicy && formData.ValidationPolicy !== 'all') count++;
     if (formData.ResidentialType) count++;
     if (formData.IPType) count++;
     if (unlockRules.some((rule) => rule.provider || rule.status || rule.keyword)) count++;
@@ -990,7 +990,7 @@ export default function SubscriptionFormDialog({
                           <Box>
                             <Typography variant="subtitle2">自定义代理组节点分配</Typography>
                             <Typography variant="caption" sx={{ color: secondaryText }}>
-                              新添加节点默认加入全部代理组，可按需取消；关闭时完全使用 Clash 模板原有的代理组规则。
+                              {t('subscriptions.form.manualGroupAssignmentHelper')}
                             </Typography>
                           </Box>
                           <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
@@ -1014,13 +1014,7 @@ export default function SubscriptionFormDialog({
                                     closeAssignmentMenu();
                                     setFormData((prev) => ({
                                       ...prev,
-                                      enableNodeTemplateAssignments: event.target.checked,
-                                      nodeTemplateAssignments: event.target.checked
-                                        ? assignNewNodesToAllGroups(
-                                            prev.nodeTemplateAssignments || {}, [],
-                                            assignmentCandidateNodes.map((node) => node.ID), clashProxyGroupOptions
-                                          )
-                                        : prev.nodeTemplateAssignments
+                                      enableNodeTemplateAssignments: event.target.checked
                                     }));
                                   }}
                                 />
@@ -1038,56 +1032,70 @@ export default function SubscriptionFormDialog({
                         )}
                         {formData.enableNodeTemplateAssignments && (
                           <Alert severity="info" variant="outlined" sx={{ my: 1.5, py: 0.25 }}>
-                          新增节点不会自动加入代理组，需要时可在下方按代理组手动选择。已有节点的分配保持不变，自动展开的前置依赖由链式代理管理。
-                          {Math.max(0, formData.selectedNodes.length - assignmentCandidateNodes.length) > 0 &&
-                            ` 当前有 ${formData.selectedNodes.length - assignmentCandidateNodes.length} 个前置依赖不会出现在候选列表中。`}
+                            新增节点不会自动加入代理组，需要时可在下方按代理组手动选择。已有节点的分配保持不变，自动展开的前置依赖由链式代理管理。
+                            {Math.max(0, formData.selectedNodes.length - assignmentCandidateNodes.length) > 0 &&
+                              ` 当前有 ${formData.selectedNodes.length - assignmentCandidateNodes.length} 个前置依赖不会出现在候选列表中。`}
                           </Alert>
                         )}
                         {formData.enableNodeTemplateAssignments && (
-                        <Stack spacing={1}>
-                          {clashProxyGroupMetadata.map((group) => {
-                            const groupName = group.name;
-                            const assignedNodeIds = assignedNodeIdsForGroup(groupName);
-                            return (
-                              <Stack
-                                key={groupName}
-                                direction={{ xs: 'column', sm: 'row' }}
-                                spacing={1}
-                                alignItems={{ sm: 'center' }}
-                                sx={{ p: 1.25, border: '1px solid', borderColor: panelBorder, borderRadius: 1.5, bgcolor: mutedPanelSurface }}
-                              >
-                                <Box sx={{ flex: 1, minWidth: 0 }}>
-                                  <Typography variant="body2" noWrap sx={{ color: primaryText, fontWeight: 500 }}>
-                                    {groupName}
-                                    {chainProxyGroupTargets.has(groupName) && (
-                                      <Chip size="small" color="warning" variant="outlined" label={`链式前置 → ${Array.from(chainProxyGroupTargets.get(groupName)).join('、')}`} sx={{ ml: 0.75, verticalAlign: 'middle' }} />
+                          <Stack spacing={1}>
+                            {clashProxyGroupMetadata.map((group) => {
+                              const groupName = group.name;
+                              const assignedNodeIds = assignedNodeIdsForGroup(groupName);
+                              return (
+                                <Stack
+                                  key={groupName}
+                                  direction={{ xs: 'column', sm: 'row' }}
+                                  spacing={1}
+                                  alignItems={{ sm: 'center' }}
+                                  sx={{
+                                    p: 1.25,
+                                    border: '1px solid',
+                                    borderColor: panelBorder,
+                                    borderRadius: 1.5,
+                                    bgcolor: mutedPanelSurface
+                                  }}
+                                >
+                                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                                    <Typography variant="body2" noWrap sx={{ color: primaryText, fontWeight: 500 }}>
+                                      {groupName}
+                                      {chainProxyGroupTargets.has(groupName) && (
+                                        <Chip
+                                          size="small"
+                                          color="warning"
+                                          variant="outlined"
+                                          label={`链式前置 → ${Array.from(chainProxyGroupTargets.get(groupName)).join('、')}`}
+                                          sx={{ ml: 0.75, verticalAlign: 'middle' }}
+                                        />
+                                      )}
+                                    </Typography>
+                                    <Typography variant="caption" sx={{ color: tertiaryText, display: 'block' }}>
+                                      直接分配 {assignedNodeIds.length} / {assignmentCandidateNodes.length} 个节点
+                                    </Typography>
+                                  </Box>
+                                  <Stack direction="row" spacing={1} alignItems="center">
+                                    {assignedNodeIds.length > 0 && (
+                                      <Chip size="small" color="primary" variant="outlined" label={assignedNodeIds.length} />
                                     )}
-                                  </Typography>
-                                  <Typography variant="caption" sx={{ color: tertiaryText, display: 'block' }}>
-                                    直接分配 {assignedNodeIds.length} / {assignmentCandidateNodes.length} 个节点
-                                  </Typography>
-                                </Box>
-                                <Stack direction="row" spacing={1} alignItems="center">
-                                  {assignedNodeIds.length > 0 && <Chip size="small" color="primary" variant="outlined" label={assignedNodeIds.length} />}
-                                  <Button
-                                    size="small"
-                                    variant={assignedNodeIds.length > 0 ? 'contained' : 'outlined'}
-                                    onClick={(event) => {
-                                      setAssignmentMenuGroup(groupName);
-                                      setAssignmentDraftNodeIds(assignedNodeIds);
-                                      setAssignmentNodeSearch('');
-                                      setAssignmentNodeGroupFilter('all');
-                                      setAssignmentNodeSourceFilter('all');
-                                      setAssignmentMenuAnchor(event.currentTarget);
-                                    }}
-                                  >
-                                    选择节点
-                                  </Button>
+                                    <Button
+                                      size="small"
+                                      variant={assignedNodeIds.length > 0 ? 'contained' : 'outlined'}
+                                      onClick={(event) => {
+                                        setAssignmentMenuGroup(groupName);
+                                        setAssignmentDraftNodeIds(assignedNodeIds);
+                                        setAssignmentNodeSearch('');
+                                        setAssignmentNodeGroupFilter('all');
+                                        setAssignmentNodeSourceFilter('all');
+                                        setAssignmentMenuAnchor(event.currentTarget);
+                                      }}
+                                    >
+                                      选择节点
+                                    </Button>
+                                  </Stack>
                                 </Stack>
-                              </Stack>
-                            );
-                          })}
-                        </Stack>
+                              );
+                            })}
+                          </Stack>
                         )}
                         <Popover
                           open={Boolean(formData.enableNodeTemplateAssignments && assignmentMenuGroup && assignmentMenuAnchor)}
@@ -1111,7 +1119,9 @@ export default function SubscriptionFormDialog({
                           }}
                         >
                           <Box sx={{ px: 2, py: 1.5, borderBottom: '1px solid', borderColor: panelBorder }}>
-                            <Typography variant="subtitle2" noWrap>{assignmentMenuGroup}</Typography>
+                            <Typography variant="subtitle2" noWrap>
+                              {assignmentMenuGroup}
+                            </Typography>
                             <Typography variant="caption" sx={{ color: secondaryText }}>
                               已选择 {assignmentDraftNodeIds.length} 个节点；节点可以同时属于多个代理组
                             </Typography>
@@ -1122,7 +1132,15 @@ export default function SubscriptionFormDialog({
                               value={assignmentNodeSearch}
                               onChange={(event) => setAssignmentNodeSearch(event.target.value)}
                               sx={{ mt: 1.25 }}
-                              slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> } }}
+                              slotProps={{
+                                input: {
+                                  startAdornment: (
+                                    <InputAdornment position="start">
+                                      <SearchIcon fontSize="small" />
+                                    </InputAdornment>
+                                  )
+                                }
+                              }}
                             />
                             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
                               <FormControl size="small" fullWidth>
@@ -1134,7 +1152,9 @@ export default function SubscriptionFormDialog({
                                 >
                                   <MenuItem value="all">全部分组</MenuItem>
                                   {assignmentNodeGroupOptions.map((group) => (
-                                    <MenuItem key={group} value={group}>{group}</MenuItem>
+                                    <MenuItem key={group} value={group}>
+                                      {group}
+                                    </MenuItem>
                                   ))}
                                 </Select>
                               </FormControl>
@@ -1147,7 +1167,9 @@ export default function SubscriptionFormDialog({
                                 >
                                   <MenuItem value="all">全部来源</MenuItem>
                                   {assignmentNodeSourceOptions.map((source) => (
-                                    <MenuItem key={source} value={source}>{source}</MenuItem>
+                                    <MenuItem key={source} value={source}>
+                                      {source}
+                                    </MenuItem>
                                   ))}
                                 </Select>
                               </FormControl>
@@ -1203,10 +1225,18 @@ export default function SubscriptionFormDialog({
                                 >
                                   <Checkbox checked={checked} sx={{ p: 0.75, mr: 1 }} />
                                   <Box sx={{ minWidth: 0, flex: 1 }}>
-                                    <Typography variant="body2" noWrap>{node.Name || node.EffectiveName || `Node #${nodeId}`}</Typography>
+                                    <Typography variant="body2" noWrap>
+                                      {node.Name || node.EffectiveName || `Node #${nodeId}`}
+                                    </Typography>
                                     <Stack direction="row" spacing={0.75} alignItems="center">
-                                      {node.Group && <Typography variant="caption" sx={{ color: tertiaryText }}>{node.Group}</Typography>}
-                                      {node.DialerProxyName && <Chip size="small" variant="outlined" color="warning" label={`经前置：${node.DialerProxyName}`} />}
+                                      {node.Group && (
+                                        <Typography variant="caption" sx={{ color: tertiaryText }}>
+                                          {node.Group}
+                                        </Typography>
+                                      )}
+                                      {node.DialerProxyName && (
+                                        <Chip size="small" variant="outlined" color="warning" label={`经前置：${node.DialerProxyName}`} />
+                                      )}
                                       {chainTargetNodeGroups.has(nodeId) && (
                                         <Chip
                                           size="small"
@@ -1221,12 +1251,23 @@ export default function SubscriptionFormDialog({
                               );
                             })}
                             {assignmentFilteredNodes.length === 0 && (
-                              <Typography variant="body2" sx={{ p: 3, textAlign: 'center', color: secondaryText }}>没有匹配的节点</Typography>
+                              <Typography variant="body2" sx={{ p: 3, textAlign: 'center', color: secondaryText }}>
+                                没有匹配的节点
+                              </Typography>
                             )}
                           </Box>
-                          <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ px: 2, py: 1.25, borderTop: '1px solid', borderColor: panelBorder, bgcolor: mutedPanelSurface }}>
-                            <Button size="small" onClick={closeAssignmentMenu}>取消</Button>
-                            <Button size="small" variant="contained" onClick={applyGroupAssignmentDraft}>完成</Button>
+                          <Stack
+                            direction="row"
+                            spacing={1}
+                            justifyContent="flex-end"
+                            sx={{ px: 2, py: 1.25, borderTop: '1px solid', borderColor: panelBorder, bgcolor: mutedPanelSurface }}
+                          >
+                            <Button size="small" onClick={closeAssignmentMenu}>
+                              取消
+                            </Button>
+                            <Button size="small" variant="contained" onClick={applyGroupAssignmentDraft}>
+                              完成
+                            </Button>
                           </Stack>
                         </Popover>
                       </Box>
@@ -1319,6 +1360,25 @@ export default function SubscriptionFormDialog({
                       }}
                       helperText={t('subscriptions.form.nodeFilter.maxFraudScoreHelper')}
                     />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <FormControl fullWidth>
+                      <InputLabel>{t('subscriptions.form.nodeFilter.validationPolicy')}</InputLabel>
+                      <Select
+                        value={formData.ValidationPolicy || 'all'}
+                        label={t('subscriptions.form.nodeFilter.validationPolicy')}
+                        onChange={(e) => setFormData({ ...formData, ValidationPolicy: e.target.value })}
+                      >
+                        {['all', 'exclude_failed', 'only_success'].map((value) => (
+                          <MenuItem key={value} value={value}>
+                            {t(`subscriptions.form.nodeFilter.validationPolicyOptions.${value}`)}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <Typography variant="caption" sx={helperCaptionSx}>
+                      {t('subscriptions.form.nodeFilter.validationPolicyHelper')}
+                    </Typography>
                   </Grid>
                   <Grid item xs={12} sm={6}>
                     <FormControl fullWidth>

@@ -263,3 +263,8 @@ export function getNodeProtocols() {
     method: 'get'
   });
 }
+
+// Structural validation only, not a connectivity/speed test.
+export function revalidateNodes(data) {
+  return request({ url: '/v1/nodes/revalidate', method: 'post', data });
+}

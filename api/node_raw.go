@@ -119,16 +119,7 @@ func UpdateNodeRawInfo(c *gin.Context) {
 		return
 	}
 
-	// 更新缓存
-	node.Link = newLink
-	if newLinkName != "" {
-		node.LinkName = newLinkName
-		if _, ok := updates["name"]; ok {
-			node.Name = newLinkName
-		}
-	}
-	node.NameMode = models.NormalizeNodeNameMode(node.NameMode)
-	models.UpdateNodeCache(req.NodeID, node)
+	// UpdateNodeFields owns the DB/cache write; never replay a stale local snapshot.
 
 	utils.OkWithData(c, gin.H{
 		"link":     newLink,

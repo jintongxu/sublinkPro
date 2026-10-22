@@ -549,7 +549,9 @@ func Run() {
 	models.InitNodeFieldsMeta()
 
 	// 初始化任务管理器
-	services.InitTaskManager()
+	if err := services.InitTaskManager(); err != nil {
+		panic(err) // Do not start producers with unreconciled tasks.
+	}
 
 	// 初始化 scheduler 包的依赖（必须在 InitTaskManager 之后）
 	services.InitSchedulerDependencies()

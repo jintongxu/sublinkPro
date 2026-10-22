@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"sublink/dto"
@@ -238,6 +239,11 @@ func SubAdd(c *gin.Context) {
 	onlyNative := c.PostForm("OnlyNative") == "true"
 	residentialType := normalizeSubscriptionResidentialType(c.PostForm("ResidentialType"))
 	ipType := normalizeSubscriptionIPType(c.PostForm("IPType"))
+	validationPolicy, policyErr := models.NormalizeValidationPolicy(c.PostForm("ValidationPolicy"))
+	if policyErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid ValidationPolicy"})
+		return
+	}
 	qualityStatus := normalizeSubscriptionQualityStatus(c.PostForm("QualityStatus"))
 	unlockProvider := models.NormalizeUnlockProvider(c.PostForm("UnlockProvider"))
 	unlockStatus := normalizeSubscriptionUnlockStatus(c.PostForm("UnlockStatus"))
@@ -336,6 +342,7 @@ func SubAdd(c *gin.Context) {
 	sub.OnlyNative = ipType == "native"
 	sub.ResidentialType = residentialType
 	sub.IPType = ipType
+	sub.ValidationPolicy = validationPolicy
 	sub.QualityStatus = qualityStatus
 	sub.UnlockProvider = unlockProvider
 	sub.UnlockStatus = unlockStatus
@@ -447,6 +454,11 @@ func SubUpdate(c *gin.Context) {
 	onlyNative := c.PostForm("OnlyNative") == "true"
 	residentialType := normalizeSubscriptionResidentialType(c.PostForm("ResidentialType"))
 	ipType := normalizeSubscriptionIPType(c.PostForm("IPType"))
+	validationPolicy, policyErr := models.NormalizeValidationPolicy(c.PostForm("ValidationPolicy"))
+	if policyErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid ValidationPolicy"})
+		return
+	}
 	qualityStatus := normalizeSubscriptionQualityStatus(c.PostForm("QualityStatus"))
 	unlockProvider := models.NormalizeUnlockProvider(c.PostForm("UnlockProvider"))
 	unlockStatus := normalizeSubscriptionUnlockStatus(c.PostForm("UnlockStatus"))
@@ -558,6 +570,7 @@ func SubUpdate(c *gin.Context) {
 	sub.OnlyNative = ipType == "native"
 	sub.ResidentialType = residentialType
 	sub.IPType = ipType
+	sub.ValidationPolicy = validationPolicy
 	sub.QualityStatus = qualityStatus
 	sub.UnlockProvider = unlockProvider
 	sub.UnlockStatus = unlockStatus

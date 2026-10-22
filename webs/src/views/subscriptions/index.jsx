@@ -52,6 +52,8 @@ import { getScripts } from 'api/scripts';
 import { getTags } from 'api/tags';
 import { getShares } from 'api/shares';
 import { getAirports } from 'api/airports';
+import { getSystemDomain } from 'api/settings';
+import { buildAutoSubscriptionUrl, resolveSubscriptionServerUrl, selectQuickCopyShare } from './subscriptionLink.mjs';
 import { buildUnlockRulesPayload, normalizeUnlockRules, setUnlockMeta } from 'views/nodes/utils';
 import { getRegisteredProtocolNames } from 'utils/protocolPresentation';
 import { getNodeDisplayName } from 'utils/nodeDisplayName';
@@ -82,6 +84,7 @@ export default function SubscriptionList() {
   const [templates, setTemplates] = useState([]);
   const [scripts, setScripts] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [quickCopyingSubId, setQuickCopyingSubId] = useState(null);
 
   // 确认对话框
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -149,6 +152,7 @@ export default function SubscriptionList() {
     OnlyNative: false,
     ResidentialType: '',
     IPType: '',
+    ValidationPolicy: 'all',
     QualityStatus: '',
     UnlockProvider: '',
     UnlockStatus: '',
@@ -624,6 +628,7 @@ export default function SubscriptionList() {
       OnlyNative: false,
       ResidentialType: '',
       IPType: '',
+      ValidationPolicy: 'all',
       QualityStatus: '',
       UnlockProvider: '',
       UnlockStatus: '',
@@ -692,14 +697,19 @@ export default function SubscriptionList() {
         if (Array.isArray(parsed)) {
           return Object.fromEntries(
             parsed
-              .map((item) => [String(item.nodeId ?? item.NodeID ?? item.id), item.templates ?? item.Templates ?? item.template ?? item.Template ?? []])
+              .map((item) => [
+                String(item.nodeId ?? item.NodeID ?? item.id),
+                item.templates ?? item.Templates ?? item.template ?? item.Template ?? []
+              ])
               .map(([nodeId, value]) => [nodeId, Array.isArray(value) ? value : value ? [value] : []])
               .filter(([, value]) => value.length > 0)
           );
         }
         if (!parsed || typeof parsed !== 'object') return {};
         return Object.fromEntries(
-          Object.entries(parsed).map(([nodeId, value]) => [nodeId, Array.isArray(value) ? value : value ? [value] : []]).filter(([, value]) => value.length > 0)
+          Object.entries(parsed)
+            .map(([nodeId, value]) => [nodeId, Array.isArray(value) ? value : value ? [value] : []])
+            .filter(([, value]) => value.length > 0)
         );
       } catch {
         return {};
@@ -714,8 +724,9 @@ export default function SubscriptionList() {
       replaceServerWithHost: config?.replaceServerWithHost || false,
       selectionMode: mode,
       selectedNodes: expandedNodeIds,
-      enableNodeTemplateAssignments: config?.nodeTemplateAssignmentsEnabled === true
-         || (config?.nodeTemplateAssignmentsEnabled === undefined && Object.keys(parsedNodeTemplateAssignments).length > 0),
+      enableNodeTemplateAssignments:
+        config?.nodeTemplateAssignmentsEnabled === true ||
+        (config?.nodeTemplateAssignmentsEnabled === undefined && Object.keys(parsedNodeTemplateAssignments).length > 0),
       nodeTemplateAssignments: parsedNodeTemplateAssignments,
       selectedGroups: groups,
       selectedAirports: airports,
@@ -742,6 +753,7 @@ export default function SubscriptionList() {
       OnlyNative: sub.OnlyNative || false,
       ResidentialType: sub.ResidentialType || (sub.OnlyResidential ? 'residential' : ''),
       IPType: sub.IPType || (sub.OnlyNative ? 'native' : ''),
+      ValidationPolicy: sub.ValidationPolicy || 'all',
       QualityStatus: sub.QualityStatus || '',
       UnlockProvider: sub.UnlockProvider || '',
       UnlockStatus: sub.UnlockStatus || '',
@@ -763,12 +775,14 @@ export default function SubscriptionList() {
     syncSelectedNodeMapFromList(sub.Nodes || []);
     setDialogOpen(true);
     const editGeneration = ++selectionGenerationRef.current;
-    selectionUpdateQueueRef.current = selectionUpdateQueueRef.current.catch(() => {}).then(async () => {
-      const expandedNodeIds = await expandNodeDependencies(rootNodeIds);
-      if (editGeneration !== selectionGenerationRef.current) return;
-      setFormData((prev) => ({ ...prev, selectedNodes: expandedNodeIds }));
-      await fetchSelectedNodeDetails(expandedNodeIds);
-    });
+    selectionUpdateQueueRef.current = selectionUpdateQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        const expandedNodeIds = await expandNodeDependencies(rootNodeIds);
+        if (editGeneration !== selectionGenerationRef.current) return;
+        setFormData((prev) => ({ ...prev, selectedNodes: expandedNodeIds }));
+        await fetchSelectedNodeDetails(expandedNodeIds);
+      });
     selectionUpdateQueueRef.current.catch((error) => console.error('展开订阅前置节点失败:', error));
     refreshNodeSelector();
   };
@@ -811,9 +825,8 @@ export default function SubscriptionList() {
       await selectionUpdateQueueRef.current.catch((error) => {
         console.error('等待节点选择更新失败:', error);
       });
-      const selectedNodeIdsForSubmit = explicitNodeIdsRef.current.length > 0
-        ? await expandNodeDependencies(explicitNodeIdsRef.current)
-        : formData.selectedNodes;
+      const selectedNodeIdsForSubmit =
+        explicitNodeIdsRef.current.length > 0 ? await expandNodeDependencies(explicitNodeIdsRef.current) : formData.selectedNodes;
       const config = JSON.stringify({
         clash: formData.clash,
         surge: formData.surge,
@@ -848,6 +861,7 @@ export default function SubscriptionList() {
         OnlyNative: formData.IPType === 'native',
         ResidentialType: formData.ResidentialType || '',
         IPType: formData.IPType || '',
+        ValidationPolicy: formData.ValidationPolicy || 'all',
         QualityStatus: formData.QualityStatus || '',
         UnlockProvider: '',
         UnlockStatus: '',
@@ -907,14 +921,16 @@ export default function SubscriptionList() {
   const applyExplicitNodeIds = (nextExplicitIds) => {
     const normalizedExplicitIds = Array.from(new Set(nextExplicitIds.map(Number).filter((id) => Number.isInteger(id) && id > 0)));
     const generation = ++selectionGenerationRef.current;
-    selectionUpdateQueueRef.current = selectionUpdateQueueRef.current.catch(() => {}).then(async () => {
-      const nextSelected = await expandNodeDependencies(normalizedExplicitIds);
-      if (generation !== selectionGenerationRef.current) return;
-      explicitNodeIdsRef.current = normalizedExplicitIds;
-      setExplicitNodeIds(normalizedExplicitIds);
-      setFormData((prev) => ({ ...prev, selectedNodes: nextSelected }));
-      await fetchSelectedNodeDetails(nextSelected);
-    });
+    selectionUpdateQueueRef.current = selectionUpdateQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        const nextSelected = await expandNodeDependencies(normalizedExplicitIds);
+        if (generation !== selectionGenerationRef.current) return;
+        explicitNodeIdsRef.current = normalizedExplicitIds;
+        setExplicitNodeIds(normalizedExplicitIds);
+        setFormData((prev) => ({ ...prev, selectedNodes: nextSelected }));
+        await fetchSelectedNodeDetails(nextSelected);
+      });
     return selectionUpdateQueueRef.current;
   };
 
@@ -1063,6 +1079,7 @@ export default function SubscriptionList() {
         OnlyNative: formData.IPType === 'native',
         ResidentialType: formData.ResidentialType || '',
         IPType: formData.IPType || '',
+        ValidationPolicy: formData.ValidationPolicy || 'all',
         QualityStatus: formData.QualityStatus || '',
         UnlockProvider: '',
         UnlockStatus: '',
@@ -1121,6 +1138,31 @@ export default function SubscriptionList() {
   const handleChainProxy = (sub) => {
     setChainProxySub(sub);
     setChainProxyOpen(true);
+  };
+
+  const handleCopySubscriptionLink = async (sub) => {
+    if (quickCopyingSubId !== null) return;
+    setQuickCopyingSubId(sub.ID);
+    try {
+      const [shareResponse, domainResponse] = await Promise.all([getShares(sub.ID), getSystemDomain()]);
+      const share = selectQuickCopyShare(shareResponse.data?.items || shareResponse.data || []);
+      if (!share) {
+        showMessage(t('subscriptions.page.messages.noAvailableShare'), 'warning');
+        return;
+      }
+      const serverUrl = resolveSubscriptionServerUrl({
+        systemDomain: domainResponse.data?.systemDomain || '',
+        origin: window.location.origin,
+        hostname: window.location.hostname,
+        development: import.meta.env.DEV,
+        apiUrl: import.meta.env.VITE_API_URL
+      });
+      await copyToClipboard(buildAutoSubscriptionUrl(serverUrl, share.token));
+    } catch {
+      showMessage(t('subscriptions.page.messages.copyLinkFailed'), 'error');
+    } finally {
+      setQuickCopyingSubId(null);
+    }
   };
 
   const handleClient = (sub) => {
@@ -1401,6 +1443,8 @@ export default function SubscriptionList() {
           tempSortData={tempSortData}
           selectedSortItems={selectedSortItems}
           theme={theme}
+          onCopySubscriptionLink={handleCopySubscriptionLink}
+          quickCopyingSubId={quickCopyingSubId}
           onToggleRow={toggleRow}
           onClient={handleClient}
           onLogs={handleLogs}
@@ -1423,6 +1467,8 @@ export default function SubscriptionList() {
         />
       ) : (
         <SubscriptionTable
+          onCopySubscriptionLink={handleCopySubscriptionLink}
+          quickCopyingSubId={quickCopyingSubId}
           subscriptions={displayedSubscriptions}
           page={page}
           rowsPerPage={rowsPerPage}

@@ -479,6 +479,17 @@ export default function NodePreviewDialog({ open, loading, data, tagColorMap, on
                     />
                   </>
                 )}
+                {(data.ValidationExcludedCount > 0 || data.ValidationDependencyExcludedCount > 0) && (
+                  <Chip
+                    size="small"
+                    color="warning"
+                    variant="outlined"
+                    label={t('subscriptions.preview.validationExcluded', {
+                      count: data.ValidationExcludedCount || 0,
+                      dependencies: data.ValidationDependencyExcludedCount || 0
+                    })}
+                  />
+                )}
                 {data.UsageTotal > 0 && (
                   <Chip
                     label={`${formatBytes(data.UsageUpload + data.UsageDownload)} / ${formatBytes(data.UsageTotal)}`}
@@ -921,6 +932,8 @@ NodePreviewDialog.propTypes = {
   loading: PropTypes.bool,
   data: PropTypes.shape({
     Nodes: PropTypes.array,
+    ValidationExcludedCount: PropTypes.number,
+    ValidationDependencyExcludedCount: PropTypes.number,
     TotalCount: PropTypes.number,
     FilteredCount: PropTypes.number
   }),

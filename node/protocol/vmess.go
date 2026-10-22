@@ -10,7 +10,7 @@ import (
 
 func init() {
 	base := newProtocolSpec("vmess", []string{"vmess://"}, "VMess", "#1976d2", "V", Vmess{}, "Ps", DecodeVMESSURL, EncodeVmessURL, func(v Vmess) LinkIdentity {
-		return buildIdentity("vmess", v.Ps, v.Host, utils.GetPortString(v.Port))
+		return buildIdentity("vmess", v.Ps, v.Add, utils.GetPortString(v.Port))
 	},
 		FieldMeta{Name: "Ps", Label: "节点名称", Type: "string", Group: "basic", Placeholder: "例如：香港-01"},
 		FieldMeta{Name: "Add", Label: "服务器地址", Type: "string", Group: "basic", Placeholder: "example.com"},

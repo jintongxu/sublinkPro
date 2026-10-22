@@ -21,6 +21,19 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestSubscriptionMalformedSSRRetainsNeighbors(t *testing.T) {
+	first := "trojan://secret@one.example.com:443#first"
+	last := "trojan://secret@two.example.com:443#last"
+	broken := "ssr://" + base64.StdEncoding.EncodeToString([]byte("example.com:8388:origin:aes-256-cfb:plain:c2VjcmV0/?broken"))
+	parsed, err := ParseSubscriptionPayloadWithDiagnostics([]byte(strings.Join([]string{first, broken, last}, "\n")))
+	if err != nil || parsed.Invalid != 1 || len(parsed.URLs) != 2 || len(parsed.Diagnostics) == 0 {
+		t.Fatalf("mixed subscription: %+v, err=%v", parsed, err)
+	}
+	if parsed.URLs[0].Url != first || parsed.URLs[1].Url != last {
+		t.Fatalf("valid neighbors lost: %+v", parsed.URLs)
+	}
+}
+
 func TestGenerateProxyLinkReconstructsDNSStyleECH(t *testing.T) {
 	proxy := protocol.Proxy{
 		Name:       "导入节点-ECH-DNS",
@@ -230,6 +243,7 @@ func TestGenerateProxyLinkRetainsUnknownClashOptions(t *testing.T) {
 }
 
 func TestExpandClashProxyProvidersFetchesReferencedHTTPProviderWithHeaders(t *testing.T) {
+	useLocalSubscriptionFetch(t)
 	var gotUserAgent string
 	var gotCustomHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -283,6 +297,7 @@ proxy-groups:
 }
 
 func TestExpandClashProxyProvidersDoesNotForwardCustomHeadersToDifferentHost(t *testing.T) {
+	useLocalSubscriptionFetch(t)
 	var gotUserAgent string
 	var gotCustomHeader string
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -325,6 +340,7 @@ func TestExpandClashProxyProvidersDoesNotForwardCustomHeadersToDifferentHost(t *
 }
 
 func TestExpandClashProxyProvidersStripsCustomHeadersOnCrossHostRedirect(t *testing.T) {
+	useLocalSubscriptionFetch(t)
 	var redirectedUserAgent string
 	var redirectedCustomHeader string
 	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -379,6 +395,7 @@ func TestFetchClashProxyProviderRejectsInvalidURLScheme(t *testing.T) {
 }
 
 func TestFetchClashProxyProviderRejectsInvalidRedirectScheme(t *testing.T) {
+	useLocalSubscriptionFetch(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "ftp://example.com/provider.yaml", http.StatusFound)
 	}))
@@ -394,6 +411,7 @@ func TestFetchClashProxyProviderRejectsInvalidRedirectScheme(t *testing.T) {
 }
 
 func TestFetchClashProxyProviderRejectsOversizedResponse(t *testing.T) {
+	useLocalSubscriptionFetch(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		chunk := strings.Repeat("x", 1024*1024)
 		for i := int64(0); i <= providerResponseSizeLimit/int64(len(chunk)); i++ {
@@ -469,6 +487,7 @@ func TestExpandClashProxyProvidersRejectsTooManySelectedProviders(t *testing.T) 
 }
 
 func TestParseClashConfigDataKeepsTopLevelProxiesWithoutFetchingProviders(t *testing.T) {
+	useLocalSubscriptionFetch(t)
 	providerFetched := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		providerFetched = true
@@ -516,6 +535,7 @@ proxy-groups:
 }
 
 func TestParseClashConfigDataExpandsProviderOnlyConfig(t *testing.T) {
+	useLocalSubscriptionFetch(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`proxies:
   - name: provider-only-node
@@ -578,6 +598,7 @@ proxy-groups:
 }
 
 func TestExpandClashProxyProvidersFallsBackToAllHTTPProvidersAndDedupesURL(t *testing.T) {
+	useLocalSubscriptionFetch(t)
 	requestCounts := make(map[string]int)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCounts[r.URL.Path]++
@@ -643,6 +664,7 @@ func TestExpandClashProxyProvidersFallsBackToAllHTTPProvidersAndDedupesURL(t *te
 }
 
 func TestExpandClashProxyProvidersReturnsProviderErrorWhenNoNodesParsed(t *testing.T) {
+	useLocalSubscriptionFetch(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "provider unavailable", http.StatusBadGateway)
 	}))
@@ -1004,4 +1026,12 @@ func assertCachedNodeCountry(t *testing.T, sourceID int, nodeID int, want string
 		}
 	}
 	t.Fatalf("cached node %d not found", nodeID)
+}
+
+// Local fixtures opt in per test; production destination policy remains unchanged.
+func useLocalSubscriptionFetch(t *testing.T) {
+	t.Helper()
+	old := subscriptionFetch
+	subscriptionFetch = func(req *http.Request, client *http.Client) (*http.Response, error) { return client.Do(req) }
+	t.Cleanup(func() { subscriptionFetch = old })
 }

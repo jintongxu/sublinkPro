@@ -86,8 +86,15 @@ func (d *clientDiagnostics) apply(c *gin.Context) {
 	if len(d.items) == 0 {
 		return
 	}
-	c.Header("X-Subscription-Diagnostics", strings.Join(d.items, " | "))
-	c.Header("X-Subscription-Diagnostics-Count", strconv.Itoa(len(d.items)))
+	items := append([]string(nil), d.items...)
+	if existing := c.Writer.Header().Get("X-Subscription-Diagnostics"); existing != "" {
+		items = append(strings.Split(existing, " | "), items...)
+	}
+	if len(items) > 8 {
+		items = items[:8]
+	}
+	c.Header("X-Subscription-Diagnostics", strings.Join(items, " | "))
+	c.Header("X-Subscription-Diagnostics-Count", strconv.Itoa(len(items)))
 }
 
 const syntheticClashTemplate = `port: 7890
@@ -115,16 +122,14 @@ var (
 	syntheticTemplateErr  error
 )
 
+var subscriptionFetch = utils.FetchSubscription
+
 func getRemoteSubscription(ctx context.Context, link string, skipTLSVerify bool) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
 	if err != nil {
 		return nil, err
 	}
-	if !skipTLSVerify {
-		return http.DefaultClient.Do(req)
-	}
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} //nolint:gosec // 用户显式启用节点级证书跳过验证
-	return client.Do(req)
+	return subscriptionFetch(req, &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: skipTLSVerify}}})
 }
 
 func setResolvedSubscriptionName(c *gin.Context, subName string) {
@@ -479,6 +484,16 @@ func resolveClashDialerProxy(node models.Node, finalNodeName string, chainNodeDi
 func prepareRendererResponse(c *gin.Context, prepared preparedClientResponse) (resolvedPreparedResponse, bool) {
 	resolved := applyPreparedResponseMode(prepared)
 	sub := resolved.Subscription
+	var diagnostics clientDiagnostics
+	c.Header("X-Subscription-Validation-Excluded", strconv.Itoa(sub.ValidationExcludedCount))
+	c.Header("X-Subscription-Validation-Dependency-Excluded", strconv.Itoa(sub.ValidationDependencyExcludedCount))
+	if sub.ValidationExcludedCount > 0 {
+		diagnostics.add(fmt.Sprintf("validation policy excluded %d nodes", sub.ValidationExcludedCount))
+	}
+	if sub.ValidationDependencyExcludedCount > 0 {
+		diagnostics.add(fmt.Sprintf("validation dependencies excluded %d nodes", sub.ValidationDependencyExcludedCount))
+	}
+	diagnostics.apply(c)
 	if sub.RefreshUsageOnRequest {
 		node.RefreshUsageForSubscriptionNodes(sub.Nodes)
 	}
@@ -676,7 +691,8 @@ func renderPreparedClash(c *gin.Context, prepared preparedClientResponse) {
 		return
 	}
 	if len(bridge.Diagnostics) > 0 {
-		c.Header("X-Subscription-Diagnostics", strings.Join(bridge.Diagnostics, " | "))
+		diagnostics := clientDiagnostics{items: bridge.Diagnostics}
+		diagnostics.apply(c)
 	}
 	_, _ = c.Writer.WriteString(string(bridge.Body))
 }
@@ -736,6 +752,26 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 	nodeNamePlan := buildClientNodeNamePlan(sub)
 	nodeNameMap := nodeNamePlan.NodeNameMap
 	dialerProxyNameMap := buildDialerProxyNameMap(sub.Nodes, nodeNameMap)
+	// Strict policies cannot emit orphan custom groups from unresolved rules,
+	// even after their dependent targets have already been omitted.
+	if sub.ValidationPolicy != "" && sub.ValidationPolicy != "all" {
+		safeRules := make([]models.SubscriptionChainRule, 0, len(chainRules))
+		for _, rule := range chainRules {
+			chain, err := rule.ResolveChainLinks(sub.Nodes, nodeNameMap)
+			safe := err == nil && chain != nil && chain.FinalDialer != ""
+			if safe {
+				for _, group := range chain.CustomGroups {
+					if len(group.Proxies) == 0 {
+						safe = false
+					}
+				}
+			}
+			if safe {
+				safeRules = append(safeRules, rule)
+			}
+		}
+		chainRules = safeRules
+	}
 
 	// 收集自定义代理组
 	customGroups := models.CollectCustomProxyGroups(chainRules, sub.Nodes, nodeNameMap)
@@ -928,7 +964,8 @@ func renderPreparedConvertedClient(c *gin.Context, prepared preparedClientRespon
 		return
 	}
 	if len(bridge.Diagnostics) > 0 {
-		c.Header("X-Subscription-Diagnostics", strings.Join(bridge.Diagnostics, " | "))
+		diagnostics := clientDiagnostics{items: bridge.Diagnostics}
+		diagnostics.apply(c)
 	}
 	subStoreConfig, _ := substore.EffectiveConfig()
 	client, err := substore.NewClient(subStoreConfig)

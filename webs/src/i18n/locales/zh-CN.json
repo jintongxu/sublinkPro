@@ -1731,6 +1731,15 @@
     }
   },
   "nodes": {
+    "validation": {
+      "title": "节点结构重验证",
+      "selected": "验证选中",
+      "all": "验证当前筛选全部（{{count}}）",
+      "confirm": "验证 {{count}} 个节点？仅检查身份与规范转换，不是连通性或测速；远程订阅会安全读取但不会展开或新增节点。确认时固定当前目标，期间新增节点不包含在内。",
+      "empty": "没有可验证的节点",
+      "failed": "提交重验证失败",
+      "started": "结构重验证任务已启动"
+    },
     "common": {
       "unknownNode": "未知节点"
     },
@@ -2529,6 +2538,7 @@
       "sortNodes": "排序节点"
     },
     "preview": {
+      "validationExcluded": "验证策略排除 {{count}} 个；链式依赖排除 {{dependencies}} 个",
       "timeout": "超时",
       "error": "错误",
       "untested": "未测",
@@ -2611,7 +2621,9 @@
         "batchSortSuccess": "批量排序成功",
         "batchSortFailed": "批量排序失败",
         "movedItems": "已移动 {{count}} 项到位置 {{position}}",
-        "shareSearchFailed": "搜索分享链接失败"
+        "shareSearchFailed": "搜索分享链接失败",
+        "noAvailableShare": "没有启用且未过期的分享链接，请先在分享管理中创建或启用。",
+        "copyLinkFailed": "获取订阅链接失败，请稍后重试。"
       }
     },
     "table": {
@@ -2625,6 +2637,7 @@
       "tooltips": {
         "preview": "预览节点",
         "copy": "复制本配置为新副本",
+        "copyAutoLink": "复制订阅链接（自动识别）",
         "share": "分享管理",
         "accessLogs": "访问记录",
         "chainProxy": "链式代理",
@@ -3044,6 +3057,7 @@
       }
     },
     "form": {
+      "manualGroupAssignmentHelper": "新选择的节点不会自动加入任何自定义代理组，请按需手动分配；关闭时使用 Clash 模板原有的代理组规则。",
       "title": {
         "add": "添加订阅",
         "edit": "编辑订阅"
@@ -3104,6 +3118,9 @@
         "maxFraudScore": "最大欺诈评分",
         "maxFraudScoreHelper": "0表示不限制；需要先执行 IP 质量检测",
         "qualityStatus": "质量状态",
+        "validationPolicy": "验证策略",
+        "validationPolicyHelper": "结构验证不代表网络可达。排除链式前置节点时也会排除依赖它的节点。",
+        "validationPolicyOptions": {"all": "全部节点（默认）", "exclude_failed": "排除失败", "only_success": "仅成功"},
         "qualityStatusHelper": "可区分完整结果、信息不全、检测失败、未启用和未检测",
         "unlockRules": "解锁筛选规则",
         "unlockRulesDesc": "不添加规则时不会启用解锁筛选。你可以按需新增规则，并设置多条规则之间是满足任意一条还是同时满足全部。",
@@ -3927,6 +3944,7 @@
       "cancelling": "停止中"
     },
     "type": {
+      "nodeRevalidate": "重新校验节点",
       "speedTest": "节点测速",
       "subUpdate": "订阅更新",
       "tagRule": "标签规则",
@@ -3945,6 +3963,7 @@
       "clear": "清除筛选"
     },
     "actions": {
+      "viewResult": "查看结果",
       "stop": "停止",
       "stopTask": "停止任务",
       "stopping": "停止中...",
@@ -3965,6 +3984,7 @@
       "hoursAgo": "{{count}} 小时前"
     },
     "result": {
+      "truncated": "仅展示部分明细（最多 200 项、32 条诊断），汇总计数为完整结果。",
       "speedTestFailed": "测速失败",
       "latency": "{{latency}}ms",
       "added": "新增 {{count}}",

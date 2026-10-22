@@ -55,11 +55,31 @@ func appendNodeAddFailure(result *NodeAddResult, name, protocolName string, reas
 		result.Diagnostics = append(result.Diagnostics, diagnostic)
 	}
 	result.Items = append(result.Items, item)
+	boundNodeAddResult(result)
 	result.Failed++
 }
 
-func processNodeAdd(ctx context.Context, input nodeAddInput) NodeAddResult {
-	result := NodeAddResult{Mode: "link"}
+// ValidateNodeLink performs structural validation only, without persistence or
+// network probes. Success requires identity extraction AND canonical conversion.
+// Batch revalidation may reuse this function without creating any node.
+func ValidateNodeLink(candidate protocol.Urls) (protocol.LinkIdentity, protocol.Proxy, error) {
+	identity, err := protocol.ExtractLinkIdentity(candidate.Url)
+	if err != nil {
+		return identity, protocol.Proxy{}, err
+	}
+	proxy, err := protocol.LinkToProxy(candidate, protocol.OutputConfig{})
+	if err != nil {
+		return identity, proxy, err
+	}
+	if identity.Host == "" || identity.Port == "" || proxy.Type == "" || proxy.Server == "" || proxy.Port.Int() <= 0 || proxy.Port.Int() > 65535 {
+		return identity, proxy, errors.New("invalid node identity")
+	}
+	return identity, proxy, nil
+}
+
+func processNodeAdd(ctx context.Context, input nodeAddInput) (result NodeAddResult) {
+	result = NodeAddResult{Mode: "link"}
+	defer func() { classifyNodeAddResult(&result) }()
 	link := strings.TrimSpace(input.Link)
 	if link == "" {
 		result.Invalid = 1
@@ -80,6 +100,9 @@ func processNodeAdd(ctx context.Context, input nodeAddInput) NodeAddResult {
 			return result
 		}
 		parsed, _ := node.ParseSubscriptionPayloadWithDiagnostics(payload)
+		result.Invalid += parsed.Invalid
+		result.OmittedDiagnostics += parsed.OmittedDiagnostics
+		result.Warnings += len(parsed.Diagnostics) + parsed.OmittedDiagnostics
 		for _, diagnostic := range parsed.Diagnostics {
 			result.Diagnostics = append(result.Diagnostics, NodeAddDiagnostic{Code: NodeAddReasonParseError, Message: TruncateNodeAddText(diagnostic.Message, maxNodeAddDiagnostic)})
 		}
@@ -87,21 +110,36 @@ func processNodeAdd(ctx context.Context, input nodeAddInput) NodeAddResult {
 			if ctx.Err() != nil {
 				break
 			}
-			identity, identityErr := protocol.ExtractLinkIdentity(candidate.Url)
+			identity, canonical, identityErr := ValidateNodeLink(candidate)
 			protocolName := protocol.GetProtocolFromLink(candidate.Url)
 			item := NodeAddItem{Name: identity.Name, Protocol: protocolName}
 			if identityErr != nil || protocolName == "" {
 				item.Status, item.Reason = NodeAddItemInvalid, NodeAddReasonInvalidInput
 				result.Invalid++
 				result.Items = append(result.Items, item)
+				boundNodeAddResult(&result)
 				continue
 			}
-			n := models.Node{Name: identity.Name, Remark: input.Remark, NameMode: models.NodeNameModeLink, Link: candidate.Url, LinkName: identity.Name, LinkAddress: identity.Address, LinkHost: identity.Host, LinkPort: identity.Port, Protocol: protocolName, DialerProxyName: input.DialerProxyName, Group: input.Group, SkipTLSVerify: input.SkipTLSVerify, ClashExtra: candidate.ClashExtra, ValidationStatus: models.ValidationStatusSuccess, ValidationReason: "validated", ValidationCheckAt: time.Now().UTC().Format(time.RFC3339)}
-			if err := n.Add(); err != nil {
-				if errors.Is(err, models.ErrNodeVariantExists) || errors.Is(err, models.ErrNodeNameExists) {
+			dialer := input.DialerProxyName
+			if dialer == "" {
+				dialer = candidate.DialerProxyName
+			}
+			n := models.Node{ContentHash: protocol.GenerateProxyContentHash(canonical), Name: models.GenerateUniqueNodeName(identity.Name, 0, nil), Remark: input.Remark, NameMode: models.NodeNameModeLink, Link: candidate.Url, LinkName: identity.Name, LinkAddress: identity.Address, LinkHost: identity.Host, LinkPort: identity.Port, Protocol: protocolName, DialerProxyName: dialer, Group: input.Group, SkipTLSVerify: input.SkipTLSVerify, ClashExtra: candidate.ClashExtra, ValidationStatus: models.ValidationStatusSuccess, ValidationReason: "validated", ValidationCheckAt: time.Now().UTC().Format(time.RFC3339)}
+			if n.ContentHash != "" {
+				if _, exists := models.GetNodeByContentHashAndDialer(n.ContentHash, n.DialerProxyName); exists {
 					item.Status, item.Reason = NodeAddItemSkipped, NodeAddReasonDuplicate
 					result.Skipped++
 					result.Items = append(result.Items, item)
+					boundNodeAddResult(&result)
+					continue
+				}
+			}
+			if err := n.Add(); err != nil {
+				if errors.Is(err, models.ErrNodeVariantExists) {
+					item.Status, item.Reason = NodeAddItemSkipped, NodeAddReasonDuplicate
+					result.Skipped++
+					result.Items = append(result.Items, item)
+					boundNodeAddResult(&result)
 				} else {
 					appendNodeAddFailure(&result, identity.Name, protocolName, NodeAddReasonPersistenceError, err)
 				}
@@ -116,6 +154,7 @@ func processNodeAdd(ctx context.Context, input nodeAddInput) NodeAddResult {
 			item.Status, item.NodeID = NodeAddItemAdded, n.ID
 			result.Added++
 			result.Items = append(result.Items, item)
+			boundNodeAddResult(&result)
 		}
 		classifyNodeAddResult(&result)
 		return result
@@ -145,12 +184,14 @@ func processNodeAdd(ctx context.Context, input nodeAddInput) NodeAddResult {
 			return result
 		}
 		for _, proxy := range clashConfig.Proxies {
+			boundNodeAddResult(&result)
 			if ctx.Err() != nil {
 				break
 			}
 			proxyLink := node.GenerateProxyLink(proxy)
 			protocolName := protocol.GetProtocolFromLink(proxyLink)
-			if proxyLink == "" || protocolName == "" {
+			_, _, validationErr := ValidateNodeLink(protocol.Urls{Url: proxyLink})
+			if proxyLink == "" || protocolName == "" || validationErr != nil {
 				result.Invalid++
 				result.Items = append(result.Items, NodeAddItem{Status: NodeAddItemInvalid, Name: proxy.Name, Reason: NodeAddReasonUnsupportedProtocol})
 				continue
@@ -200,7 +241,7 @@ func processNodeAdd(ctx context.Context, input nodeAddInput) NodeAddResult {
 		classifyNodeAddResult(&result)
 		return result
 	}
-	identity, err := protocol.ExtractLinkIdentity(link)
+	identity, _, err := ValidateNodeLink(protocol.Urls{Url: link})
 	if err != nil {
 		result.Invalid = 1
 		result.Items = []NodeAddItem{{Status: NodeAddItemInvalid, Reason: NodeAddReasonInvalidInput}}
@@ -234,6 +275,18 @@ func processNodeAdd(ctx context.Context, input nodeAddInput) NodeAddResult {
 				_, exists = models.GetNodeByContentHashSourceAndDialer(n.ContentHash, 0, n.DialerProxyName)
 			}
 			if exists {
+				existing, _ := models.GetNodeByContentHashAndDialer(n.ContentHash, n.DialerProxyName)
+				if existing != nil {
+					source := existing.Source
+					if source == "" || source == "manual" {
+						source = "手动添加"
+					}
+					group := existing.Group
+					if group == "" {
+						group = "未分组"
+					}
+					result.DuplicateInfo = map[string]string{"name": name, "source": source, "group": group, "existingName": existing.Name}
+				}
 				result.Skipped = 1
 				result.Items = []NodeAddItem{{Status: NodeAddItemSkipped, Name: name, Protocol: protocolName, Reason: NodeAddReasonDuplicate}}
 				classifyNodeAddResult(&result)

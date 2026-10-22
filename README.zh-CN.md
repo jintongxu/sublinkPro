@@ -60,11 +60,12 @@
 |:---|:---|:---:|
 | 🏷️ **智能标签系统** | 自动规则打标签、零代码筛选、支持 IP 质量条件 | [📖](docs/features/tags.zh-CN.md) |
 | ⚡ **专业测速系统** | 双阶段测试、智能延迟测量、支持 IP 质量检测与解锁检测 | [📖](docs/features/speedtest.zh-CN.md) |
+| 🔎 **结构验证** | 快照保护的节点重验证、可恢复任务观察、订阅状态策略（非测速） | [📖](docs/features/node-validation.zh-CN.md) |
 | 🔗 **链式代理** | Dialer-Proxy 原生支持、可视化配置、支持按 IP 质量选节点 | [📖](docs/features/chain-proxy.zh-CN.md) |
 | 🤖 **AI 模板编辑** | 用自然语言生成操作式预览，审阅只读对比，接受到编辑器后再正常保存 | [📖](docs/features/template-ai.zh-CN.md) |
 | ✈️ **机场管理** | 多格式导入、定时更新、流量监控、一键全量拉取 | [📖](docs/features/airport.zh-CN.md) |
 | 🗂️ **分组排序** | 分组内机场优先级拖拽排序，控制订阅输出中的节点顺序 | [📖](docs/development.zh-CN.md) |
-| 📋 **订阅分享** | 多链接管理、过期策略、访问统计 | [📖](docs/features/subscription-share.zh-CN.md) |
+| 📋 **订阅分享** | 快捷复制自动识别链接、多链接管理、过期策略、访问统计 | [📖](docs/features/subscription-share.zh-CN.md) |
 | 🌐 **Host 管理** | 域名映射、DNS 配置、CDN 优选 | [📖](docs/features/host.zh-CN.md) |
 | ☁️ **Cloudflare Tunnel** | 无公网 IP 暴露管理界面、页面托管 cloudflared | [📖](docs/features/cloudflare-tunnel.zh-CN.md) |
 | 💾 **WebDAV 备份** | 加密保存 WebDAV 凭据，支持手动或定时上传系统备份、查看远程 ZIP 并从页面恢复 | [📖](docs/features/backup.zh-CN.md) |
@@ -160,6 +161,7 @@ docker-compose up -d
 |:---|:---|
 | [🏷️ 智能标签系统](docs/features/tags.zh-CN.md) | 自动规则打标签、零代码筛选、IP 质量规则 |
 | [⚡ 测速系统](docs/features/speedtest.zh-CN.md) | 测速原理、IP 质量检测、解锁检测、参数配置 |
+| [🔎 节点结构验证](docs/features/node-validation.zh-CN.md) | 导入兼容、任务恢复、重验证、订阅策略与抓取安全 |
 | [🌍 解锁检测](docs/features/unlock-check.zh-CN.md) | 流媒体 / AI 可用区检测、Provider 架构、扩展方式 |
 | [🔗 链式代理](docs/features/chain-proxy.zh-CN.md) | Dialer-Proxy、条件选节点、配置流程 |
 | [🤖 AI 模板编辑](docs/features/template-ai.zh-CN.md) | 操作式预览、只读对比审阅、接受到编辑器、正常保存 |

@@ -31,7 +31,8 @@ const (
 	TaskTypeTagRule           TaskType = "tag_rule"      // 标签规则
 	TaskTypeDatabaseMigration TaskType = "db_migration"  // 数据库迁移
 	TaskTypeWebDAVBackup      TaskType = "webdav_backup" // WebDAV 定时备份
-	TaskTypeNodeAdd           TaskType = "node_add"      // 异步添加节点
+	TaskTypeNodeRevalidate    TaskType = "node_revalidate"
+	TaskTypeNodeAdd           TaskType = "node_add" // 异步添加节点
 )
 
 // TaskTrigger 任务触发方式
@@ -283,10 +284,14 @@ func GetTaskStats() map[string]int64 {
 
 // MarkRunningTasksAsError 将所有运行中的任务标记为错误（用于服务重启时）
 func MarkRunningTasksAsError() error {
-	return database.DB.Model(&Task{}).
-		Where("status = ?", TaskStatusRunning).
+	if err := database.DB.Model(&Task{}).
+		Where("status IN ?", []TaskStatus{TaskStatusPending, TaskStatusRunning}).
 		Updates(map[string]any{
-			"status":  TaskStatusError,
-			"message": "服务重启，任务被中断",
-		}).Error
+			"status":       TaskStatusError,
+			"message":      "服务重启，任务被中断",
+			"completed_at": time.Now(),
+		}).Error; err != nil {
+		return err
+	}
+	return InitTaskCache()
 }

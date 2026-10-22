@@ -26,6 +26,8 @@ export default function BatchActions({
   totalCount,
   onSelectAll,
   onClearSelection,
+  onRevalidate,
+  onRevalidateAll,
   onDelete,
   onGroup,
   onSource,
@@ -187,6 +189,12 @@ export default function BatchActions({
       >
         {t('nodes.batch.removeTags')}
       </Button>
+      <Button size="small" variant="outlined" onClick={onRevalidate} disabled={!hasSelection}>
+        {t('nodes.validation.selected')}
+      </Button>
+      <Button size="small" variant="outlined" onClick={onRevalidateAll} disabled={!totalCount}>
+        {t('nodes.validation.all', { count: totalCount })}
+      </Button>
     </Stack>
   );
 }
@@ -196,6 +204,8 @@ BatchActions.propTypes = {
   totalCount: PropTypes.number.isRequired,
   onSelectAll: PropTypes.func.isRequired,
   onClearSelection: PropTypes.func.isRequired,
+  onRevalidate: PropTypes.func.isRequired,
+  onRevalidateAll: PropTypes.func.isRequired,
   onDelete: PropTypes.func.isRequired,
   onGroup: PropTypes.func.isRequired,
   onSource: PropTypes.func.isRequired,

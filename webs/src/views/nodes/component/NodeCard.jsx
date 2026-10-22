@@ -1,3 +1,4 @@
+import { getValidationDisplay } from '../validationDisplay.mjs';
 import PropTypes from 'prop-types';
 import { useTranslation } from 'react-i18next';
 
@@ -34,6 +35,7 @@ import { getNodePanelSx, getNodeTagChipSx, getNodeThemeTokens } from '../nodeThe
  */
 export default function NodeCard({ node, isSelected, tagColorMap, protocolMeta, onSelect, onViewDetails }) {
   const { t } = useTranslation();
+  const validation = getValidationDisplay(node, t);
   const theme = useTheme();
   const { isDark } = useResolvedColorScheme();
   const tokens = getNodeThemeTokens(theme, isDark);
@@ -105,8 +107,16 @@ export default function NodeCard({ node, isSelected, tagColorMap, protocolMeta, 
           </Stack>
         </Box>
 
+        {validation.detail && (
+          <Typography variant="caption" sx={{ display: 'block', mb: 1, color: tokens.secondaryText, overflowWrap: 'anywhere' }}>
+            {validation.detail}
+          </Typography>
+        )}
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
           <NodeProtocolChip link={node.Link} protocolMeta={protocolMeta} maxWidth={104} />
+          <Tooltip title={validation.detail || validation.label}>
+            <Chip size="small" label={validation.label} color={validation.color} variant="outlined" />
+          </Tooltip>
           {node.Group && (
             <Tooltip title={t('nodes.mobile.groupTooltip', { group: node.Group })}>
               <Chip
