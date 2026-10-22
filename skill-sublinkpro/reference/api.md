@@ -141,17 +141,24 @@ Base: `/api/v1/users`
 Base: `/api/v1/nodes`
 
 ### Add Node
-**POST** `/nodes/add` — **form**
-- **Required:** `link` (proxy URI, WireGuard config text, or Clash YAML containing `proxies:`)
-- Optional: `name`, `nameMode` (`link` = use upstream name, `remark` = use custom `name`; `custom` is accepted as an alias of `remark`), `remark` (independent note for the whole node, such as source/purpose), `dialerProxyName`, `group`
+**POST** `/nodes/add-async` — **form**, preferred UI/API path
+- Creates a persisted `node_add` background task and returns immediately as `{code,msg,data:{taskId,task,total}}`. Track it through the task SSE stream or `GET /api/v1/tasks/:id`; users may leave the node page while it runs. The final task `result` uses the structured node-add result described below.
+- **Required:** `link` (one or more newline/comma-separated proxy URIs, WireGuard config text, or Clash YAML containing `proxies:`)
+- Optional: `name`, `nameMode` (`link` = use upstream name, `remark` = use custom `name`; `custom` is accepted as an alias of `remark`), `remark` (independent note for the whole node, such as source/purpose), `dialerProxyName`, `group`, `skipTLSVerify` (boolean; only affects HTTPS remote subscription links embedded as nodes; use only when the endpoint certificate cannot be verified), `tags`.
+- The final task result includes `mode`, `status` (`success|partial|skipped|invalid|failed`), counts (`added`, `skipped`, `invalid`, `failed`, optional `warnings`), safe per-item `items`, and bounded `diagnostics`. A warning means the node was saved but an auxiliary operation such as tag assignment failed, so the overall status is `partial`. Item statuses are `added|skipped|invalid|failed`; reason codes identify malformed input, unsupported protocol, network/TLS, parsing, duplicate, or persistence failures. Credential-bearing URLs and raw secrets are never returned.
+- **POST** `/nodes/add` remains available as the backward-compatible synchronous endpoint with the same form fields and structured result.
 
 ### Update Node
 **POST** `/nodes/update` — **form**
 - Located by `oldlink` (and/or `oldname`), NOT by id.
-- Fields: `oldname`, `oldlink`, `link` (required, the new/confirmed link), `name`, `nameMode`, `remark` (independent whole-node note), `dialerProxyName`, `group`, `tags`
+- Fields: `oldname`, `oldlink`, `link` (required, the new/confirmed link), `name`, `nameMode`, `remark` (independent whole-node note), `dialerProxyName`, `group`, `skipTLSVerify` (boolean; only affects HTTPS remote subscription links), `tags`.
+- Nodes expose additive validation fields: `ValidationStatus` (`untested|success|partial|failed|disabled`), `ValidationReason` (bounded safe text), and `ValidationCheckAt`. These describe import/remote-output validation and are separate from speed, delay, quality, and unlock checks.
 
 ### Delete Node
 **DELETE** `/nodes/delete` (query: `?id=123`)
+
+### Validation and subscription diagnostics
+Remote HTTPS subscription nodes are fetched during add/output using the node's `skipTLSVerify` setting. A successful validation reports the detected format and parsed/output counts through the structured add result; partial results retain valid nodes and report bounded diagnostics. During client subscription generation, partial remote fetch/parse failures are preserved in the additive `X-Subscription-Diagnostics` and `X-Subscription-Diagnostics-Count` response headers when applicable. Header values are bounded and redacted; clients that ignore these headers continue to receive the valid subscription body.
 
 ### Batch Delete
 **DELETE** `/nodes/batch-delete` — **JSON** `{"ids": [1,2,3]}`

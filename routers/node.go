@@ -12,6 +12,7 @@ func Nodes(r *gin.Engine) {
 	NodesGroup.Use(middlewares.AuthToken)
 	{
 		NodesGroup.POST("/add", api.NodeAdd)
+		NodesGroup.POST("/add-async", api.NodeAddAsync)
 		NodesGroup.DELETE("/delete", api.NodeDel)
 		NodesGroup.DELETE("/batch-delete", api.NodeBatchDel)
 		NodesGroup.POST("/batch-update-group", api.NodeBatchUpdateGroup)

@@ -31,6 +31,7 @@ const (
 	TaskTypeTagRule           TaskType = "tag_rule"      // 标签规则
 	TaskTypeDatabaseMigration TaskType = "db_migration"  // 数据库迁移
 	TaskTypeWebDAVBackup      TaskType = "webdav_backup" // WebDAV 定时备份
+	TaskTypeNodeAdd           TaskType = "node_add"      // 异步添加节点
 )
 
 // TaskTrigger 任务触发方式

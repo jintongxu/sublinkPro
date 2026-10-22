@@ -456,35 +456,115 @@ func parseClashProviderPayload(data []byte) ([]protocol.Proxy, error) {
 	return nil, fmt.Errorf("未找到节点")
 }
 
-// ParseSubscriptionPayload parses a remote subscription response into links
-// suitable for client conversion. It accepts Clash/Mihomo YAML as well as
-// Base64 or plain-text protocol links.
-func ParseSubscriptionPayload(data []byte) ([]protocol.Urls, error) {
-	proxies, err := parseClashProviderPayload(data)
-	if err != nil {
-		return nil, err
-	}
+// SubscriptionDiagnostic is a safe, bounded explanation of a skipped subscription
+// entry. Message intentionally contains no input text (which may contain secrets).
+type SubscriptionDiagnostic struct {
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
+	Line    int    `json:"line,omitempty"`
+}
 
-	urls := make([]protocol.Urls, 0, len(proxies))
+// SubscriptionParseResult contains all valid links and non-sensitive parse diagnostics.
+type SubscriptionParseResult struct {
+	URLs        []protocol.Urls          `json:"urls"`
+	Diagnostics []SubscriptionDiagnostic `json:"diagnostics,omitempty"`
+}
+
+const (
+	subscriptionDiagnosticLimit        = 32
+	subscriptionDiagnosticMessageLimit = 256
+)
+
+func addSubscriptionDiagnostic(result *SubscriptionParseResult, kind, message string, line int) {
+	if len(result.Diagnostics) >= subscriptionDiagnosticLimit {
+		return
+	}
+	message = strings.TrimSpace(message)
+	if len([]rune(message)) > subscriptionDiagnosticMessageLimit {
+		message = string([]rune(message)[:subscriptionDiagnosticMessageLimit])
+	}
+	result.Diagnostics = append(result.Diagnostics, SubscriptionDiagnostic{Kind: kind, Message: message, Line: line})
+}
+
+func subscriptionURLsFromProxies(proxies []protocol.Proxy, result *SubscriptionParseResult) {
 	for _, proxy := range proxies {
 		link := GenerateProxyLink(proxy)
 		if strings.TrimSpace(link) == "" {
+			addSubscriptionDiagnostic(result, "invalid-node", "node link could not be generated", 0)
 			continue
 		}
 		clashExtra, extraErr := protocol.EncodeClashExtra(proxy)
 		if extraErr != nil {
-			utils.Warn("远程订阅节点 %q 的 Clash 扩展字段解析失败: %v", proxy.Name, extraErr)
+			// Keep the node; extension metadata is optional.
+			addSubscriptionDiagnostic(result, "node-metadata", "optional node metadata could not be encoded", 0)
 		}
-		urls = append(urls, protocol.Urls{
-			Url:             link,
-			DialerProxyName: proxy.Dialer_proxy,
-			ClashExtra:      clashExtra,
-		})
+		result.URLs = append(result.URLs, protocol.Urls{Url: link, DialerProxyName: proxy.Dialer_proxy, ClashExtra: clashExtra})
 	}
-	if len(urls) == 0 {
-		return nil, fmt.Errorf("远程订阅未找到可用节点")
+}
+
+// ParseSubscriptionPayloadWithDiagnostics parses YAML, Base64 and plain links while
+// retaining valid entries when neighboring entries are malformed. Diagnostics are
+// deliberately generic so subscription credentials cannot leak through errors.
+func ParseSubscriptionPayloadWithDiagnostics(data []byte) (SubscriptionParseResult, error) {
+	result := SubscriptionParseResult{URLs: make([]protocol.Urls, 0)}
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		addSubscriptionDiagnostic(&result, "empty", "subscription payload is empty", 0)
+		return result, fmt.Errorf("远程订阅未找到可用节点")
 	}
-	return urls, nil
+
+	// A valid Clash document takes precedence, as in the compatibility parser.
+	var config ClashConfig
+	errYAML := yaml.Unmarshal(data, &config)
+	if errYAML == nil && len(config.Proxies) > 0 {
+		subscriptionURLsFromProxies(config.Proxies, &result)
+		if len(result.URLs) > 0 {
+			return result, nil
+		}
+		addSubscriptionDiagnostic(&result, "no-nodes", "YAML contained no usable nodes", 0)
+	} else if errYAML != nil && (strings.Contains(trimmed, "proxies:") || strings.Contains(trimmed, "proxy-providers:")) {
+		addSubscriptionDiagnostic(&result, "yaml", "YAML payload could not be parsed", 0)
+	}
+
+	// Try Base64 only when decoding produces protocol-looking content. This avoids
+	// treating ordinary text as a successful Base64 parse.
+	candidate := []byte(trimmed)
+	decoded, b64Err := base64.StdEncoding.DecodeString(trimmed)
+	if b64Err != nil {
+		decoded, b64Err = base64.RawStdEncoding.DecodeString(trimmed)
+	}
+	if b64Err == nil && (strings.Contains(string(decoded), "://") || strings.Contains(string(decoded), "\n")) {
+		candidate = decoded
+	} else if b64Err != nil && !strings.Contains(trimmed, "://") {
+		addSubscriptionDiagnostic(&result, "base64", "Base64 payload could not be decoded", 0)
+	}
+
+	for lineNumber, line := range strings.Split(string(candidate), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		proxy, err := protocol.LinkToProxy(protocol.Urls{Url: line}, protocol.OutputConfig{})
+		if err != nil {
+			addSubscriptionDiagnostic(&result, "link", "invalid subscription link", lineNumber+1)
+			continue
+		}
+		subscriptionURLsFromProxies([]protocol.Proxy{proxy}, &result)
+	}
+	if len(result.URLs) == 0 {
+		addSubscriptionDiagnostic(&result, "no-nodes", "remote subscription contained no usable nodes", 0)
+		return result, fmt.Errorf("远程订阅未找到可用节点")
+	}
+	return result, nil
+}
+
+// ParseSubscriptionPayload preserves the historical all-or-nothing API.
+func ParseSubscriptionPayload(data []byte) ([]protocol.Urls, error) {
+	result, err := ParseSubscriptionPayloadWithDiagnostics(data)
+	if err != nil {
+		return nil, err
+	}
+	return result.URLs, nil
 }
 
 func parseSubscriptionLinkProxies(data []byte) []protocol.Proxy {

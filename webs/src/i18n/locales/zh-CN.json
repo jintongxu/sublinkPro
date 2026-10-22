@@ -1777,6 +1777,7 @@
         "updateSuccess": "更新成功",
         "updateFailed": "更新失败",
         "addSuccess": "添加成功",
+        "addTaskStarted": "节点添加任务已提交，可在右上角任务进度中查看",
         "addFailed": "添加失败",
         "speedConfigMoved": "测速配置已迁移至检测策略管理",
         "speedTaskStarted": "测速任务已在后台启动，请稍后刷新查看结果",
@@ -1792,6 +1793,8 @@
     },
     "dialog": {
       "addTitle": "添加节点",
+      "submitting": "正在处理第 {{current}}/{{total}} 项，请稍候…",
+      "submittingButton": "处理中…",
       "editTitle": "编辑节点",
       "fields": {
         "link": "节点链接",
@@ -1800,6 +1803,7 @@
         "remarkNameHelper": "自定义备注会保存在 Name 字段，不会被机场更新覆盖。",
         "remark": "节点备注",
         "remarkPlaceholder": "例如：来源、用途、账号说明",
+        "skipTLSVerify": "跳过 TLS 证书验证（仅远程订阅链接）",
         "remarkHelper": "独立于节点名称，仅用于记录这个节点的备注信息。",
         "nameMode": "实际使用名称",
         "nameModeHelper": "控制订阅输出、重命名规则、脚本和链式代理使用哪个名称。",
@@ -1974,6 +1978,17 @@
         "edit": "编辑",
         "delete": "删除"
       }
+    },
+    "addResult": {
+      "title": "节点添加结果",
+      "mode": "模式：{{mode}}",
+      "successAll": "成功添加 {{count}} 个节点。",
+      "unknownNode": "未知节点",
+      "itemsTitle": "条目详情",
+      "diagnostics": "诊断信息",
+      "tlsValidated": "TLS 已验证，输出可用。",
+      "tlsSavedUnverified": "已保存，但 TLS 尚未验证，请使用前检查。",
+      "stats": { "received": "收到：{{count}}", "validated": "已验证：{{count}}", "added": "已添加：{{count}}", "saved": "已保存：{{count}}", "output_ready": "输出就绪：{{count}}", "skipped": "已跳过：{{count}}", "invalid": "无效：{{count}}", "failed": "失败：{{count}}", "warnings": "警告：{{count}}", "total": "总计：{{count}}" }
     },
     "rawProtocolDialog": {
       "title": "协议参数",
@@ -2308,6 +2323,15 @@
       "referencedBy": "引用：{{names}}",
       "delay": "延迟",
       "speed": "速度",
+      "validation": "有效性",
+      "validationCheckedAt": "检测于 {{time}}",
+      "validationStatus": {
+        "untested": "未测试",
+        "success": "有效",
+        "partial": "部分有效",
+        "failed": "失败",
+        "disabled": "已禁用"
+      },
       "actions": "操作",
       "originalName": "原始：{{name}}",
       "remarkName": "备注：{{name}}",
@@ -3907,7 +3931,8 @@
       "subUpdate": "订阅更新",
       "tagRule": "标签规则",
       "dbMigration": "数据迁移",
-      "webdavBackup": "WebDAV 备份"
+      "webdavBackup": "WebDAV 备份",
+      "nodeAdd": "添加节点"
     },
     "trigger": {
       "manual": "手动",
@@ -3943,6 +3968,9 @@
       "speedTestFailed": "测速失败",
       "latency": "{{latency}}ms",
       "added": "新增 {{count}}",
+      "skipped": "跳过 {{count}}",
+      "invalid": "无效 {{count}}",
+      "failed": "失败 {{count}}",
       "exists": "已存在 {{count}}",
       "deleted": "删除 {{count}}",
       "matchedNodes": "命中 {{matched}}/{{total}} 个节点",

@@ -100,6 +100,9 @@ func (tm *TaskManager) UpdateProgress(taskID string, progress int, currentItem s
 	if !ok {
 		return errors.New("任务不存在或已结束")
 	}
+	if running.Task.Status != models.TaskStatusRunning {
+		return errors.New("任务已进入终态")
+	}
 
 	// 仅更新内存中的任务状态
 	running.Task.Progress = progress
@@ -121,6 +124,9 @@ func (tm *TaskManager) UpdateTotal(taskID string, total int) error {
 	if !ok {
 		return errors.New("任务不存在或已结束")
 	}
+	if running.Task.Status != models.TaskStatusRunning {
+		return errors.New("任务已进入终态")
+	}
 
 	// 仅更新内存中的任务总数
 	running.Task.Total = total
@@ -139,6 +145,9 @@ func (tm *TaskManager) CompleteTask(taskID string, message string, result any) e
 	running, ok := tm.runningTasks[taskID]
 	if !ok {
 		return errors.New("任务不存在或已结束")
+	}
+	if running.Task.Status != models.TaskStatusRunning {
+		return errors.New("任务已进入终态")
 	}
 
 	// 更新状态
@@ -189,6 +198,9 @@ func (tm *TaskManager) FailTask(taskID string, errMsg string) error {
 	running, ok := tm.runningTasks[taskID]
 	if !ok {
 		return errors.New("任务不存在或已结束")
+	}
+	if running.Task.Status != models.TaskStatusRunning {
+		return errors.New("任务已进入终态")
 	}
 
 	// 更新状态
@@ -243,6 +255,10 @@ func (tm *TaskManager) CancelTask(taskID string) error {
 		task.Message = "用户取消"
 		task.CompletedAt = new(time.Now())
 		return task.SyncFinalStatus()
+	}
+
+	if running.Task.Status != models.TaskStatusRunning {
+		return errors.New("任务已结束，无法取消")
 	}
 
 	// 更新状态

@@ -1,6 +1,6 @@
 import PropTypes from 'prop-types';
 import { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { stopTask as stopTaskApi } from 'api/tasks';
+import { getTask, stopTask as stopTaskApi } from 'api/tasks';
 
 // ==============================|| TASK PROGRESS CONTEXT ||============================== //
 
@@ -18,12 +18,15 @@ export function TaskProgressProvider({ children }) {
   // Track tasks that are being stopped
   const [stoppingTasks, setStoppingTasks] = useState(new Set());
 
-  // Callbacks to invoke when a task completes
+  // Callbacks to invoke when any task completes
   const onCompleteCallbacksRef = useRef(new Set());
+  const terminalTasksRef = useRef(new Set());
 
   // Update or add a task
   const updateTask = useCallback((taskId, taskData) => {
     setTasks((prev) => {
+      const incomingTerminal = ['completed', 'error', 'cancelled'].includes(taskData.status);
+      if (terminalTasksRef.current.has(taskId) && !incomingTerminal) return prev;
       const newTasks = new Map(prev);
       const existing = newTasks.get(taskId) || {};
       newTasks.set(taskId, {
@@ -98,7 +101,11 @@ export function TaskProgressProvider({ children }) {
 
       if (!taskId) return;
 
-      if (status === 'completed' || status === 'error' || status === 'cancelled') {
+      const isTerminal = status === 'completed' || status === 'error' || status === 'cancelled';
+      if (terminalTasksRef.current.has(taskId)) return;
+      if (isTerminal) terminalTasksRef.current.add(taskId);
+
+      if (isTerminal) {
         // Update task with completed/cancelled status, then schedule removal
         updateTask(taskId, {
           taskId,
@@ -163,6 +170,49 @@ export function TaskProgressProvider({ children }) {
 
   // Check if there are any active tasks
   const hasActiveTasks = useMemo(() => taskList.length > 0, [taskList]);
+  const activeTaskIds = useMemo(
+    () => taskList.filter((task) => !['completed', 'error', 'cancelled'].includes(task.status)).map((task) => task.taskId).sort(),
+    [taskList]
+  );
+  const activeTaskKey = activeTaskIds.join(',');
+
+  // SSE is primary; periodic reads replay terminal state across navigation or SSE reconnects.
+  useEffect(() => {
+    if (!activeTaskKey) return undefined;
+    let disposed = false;
+    const taskIds = activeTaskKey.split(',').filter(Boolean);
+    const reconcile = async () => {
+      await Promise.all(
+        taskIds.map(async (taskId) => {
+          try {
+            const response = await getTask(taskId);
+            const task = response.data;
+            if (disposed || !task || !['completed', 'error', 'cancelled'].includes(task.status)) return;
+            handleProgressEvent({
+              taskId: task.id,
+              taskType: task.type,
+              taskName: task.name,
+              status: task.status,
+              current: task.progress,
+              total: task.total,
+              currentItem: task.currentItem,
+              result: task.result ? JSON.parse(task.result) : null,
+              message: task.message,
+              startTime: task.startedAt ? new Date(task.startedAt).getTime() : Date.now()
+            });
+          } catch (error) {
+            if (!disposed) console.error('Failed to reconcile task:', error);
+          }
+        })
+      );
+    };
+    const timer = window.setInterval(reconcile, 5000);
+    reconcile();
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [activeTaskKey, handleProgressEvent]);
 
   // Register a callback to be invoked when any task completes
   const registerOnComplete = useCallback((callback) => {

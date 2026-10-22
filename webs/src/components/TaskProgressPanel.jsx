@@ -16,6 +16,7 @@ import CloudSyncIcon from '@mui/icons-material/CloudSync';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import StorageIcon from '@mui/icons-material/Storage';
 import BackupIcon from '@mui/icons-material/Backup';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
@@ -75,14 +76,15 @@ const TaskProgressItem = ({ task, currentTime, onStopTask, isStopping }) => {
       sub_update: CloudSyncIcon,
       tag_rule: LocalOfferIcon,
       db_migration: StorageIcon,
-      webdav_backup: BackupIcon
+      webdav_backup: BackupIcon,
+      node_add: AddCircleOutlineIcon
     };
 
     return {
       icon: iconMap[task.taskType] || CloudSyncIcon,
       label: meta.label,
       accentColor: meta.color,
-      canStop: task.taskType === 'speed_test' || task.taskType === 'sub_update'
+      canStop: task.taskType === 'speed_test' || task.taskType === 'sub_update' || task.taskType === 'node_add'
     };
   }, [task.taskType, t]);
 
@@ -151,6 +153,16 @@ const TaskProgressItem = ({ task, currentTime, onStopTask, isStopping }) => {
       if (exists !== undefined) parts.push(t('tasks.result.exists', { count: exists }));
       if (deleted !== undefined) parts.push(t('tasks.result.deleted', { count: deleted }));
       return parts.length > 0 ? parts.join(' · ') : null;
+    }
+
+    if (task.taskType === 'node_add') {
+      const parts = [];
+      if (task.result.added !== undefined) parts.push(t('tasks.result.added', { count: task.result.added }));
+      if (task.result.skipped !== undefined) parts.push(t('tasks.result.skipped', { count: task.result.skipped }));
+      if (task.result.invalid !== undefined) parts.push(t('tasks.result.invalid', { count: task.result.invalid }));
+      if (task.result.failed !== undefined) parts.push(t('tasks.result.failed', { count: task.result.failed }));
+      if (task.result.warnings !== undefined) parts.push(t('tasks.result.warnings', { count: task.result.warnings }));
+      return parts.join(' · ');
     }
 
     if (task.taskType === 'tag_rule') {

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -37,6 +38,37 @@ const testSurgeTemplate = `[General]
 [Proxy Group]
 test = select
 `
+
+func TestGetRemoteSubscriptionSkipTLSVerify(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("subscription-body"))
+	}))
+	defer server.Close()
+
+	resp, err := getRemoteSubscription(context.Background(), server.URL, false)
+	if err == nil {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		t.Fatal("expected certificate verification to fail when skipTLSVerify is false")
+	}
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+
+	resp, err = getRemoteSubscription(context.Background(), server.URL, true)
+	if err != nil {
+		t.Fatalf("skip TLS verification request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if string(body) != "subscription-body" {
+		t.Fatalf("response body = %q, want subscription-body", body)
+	}
+}
 
 func setupClientsAPITestDB(t *testing.T) {
 	t.Helper()
@@ -1188,7 +1220,7 @@ func TestGetClientExpandedTargetUsesDatabaseSubStoreSettings(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%q", recorder.Code, recorder.Body.String())
 	}
-	if recorder.Body.String() != "database settings converted output" {
+	if recorder.Body.String() != "[Proxy]\ndatabase settings converted output\n" {
 		t.Fatalf("unexpected converted body: %q", recorder.Body.String())
 	}
 }

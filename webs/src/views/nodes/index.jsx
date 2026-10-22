@@ -32,7 +32,7 @@ import IPDetailsDialog from 'components/IPDetailsDialog';
 import {
   getNodes,
   getNodeIds,
-  addNodes,
+  addNodesAsync,
   updateNode,
   deleteNode,
   deleteNodesBatch,
@@ -136,7 +136,7 @@ export default function NodeList() {
   );
 
   // Task progress for auto-refresh
-  const { registerOnComplete, unregisterOnComplete } = useTaskProgress();
+  const { registerOnComplete, unregisterOnComplete, updateTask } = useTaskProgress();
 
   const [nodes, setNodes] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -169,6 +169,7 @@ export default function NodeList() {
     link: '',
     dialerProxyName: '',
     group: '',
+    skipTLSVerify: false,
     mergeMode: '2', // 分开模式
     tags: [] // 标签列表
   });
@@ -176,6 +177,8 @@ export default function NodeList() {
   // 添加结果汇总弹窗
   const [addResultDialogOpen, setAddResultDialogOpen] = useState(false);
   const [addResult, setAddResult] = useState(null);
+  const [submittingNode, setSubmittingNode] = useState(false);
+  const [submitProgress, setSubmitProgress] = useState(null);
 
   // 原始协议对话框
   const [rawProtocolDialogOpen, setRawProtocolDialogOpen] = useState(false);
@@ -698,10 +701,14 @@ export default function NodeList() {
 
   // 监听任务完成，自动刷新节点列表
   useEffect(() => {
-    const onTaskComplete = ({ taskType, status }) => {
-      // 当测速或订阅更新任务完成时，自动刷新列表
-      if (status === 'completed' && (taskType === 'speed_test' || taskType === 'sub_update')) {
+    const onTaskComplete = ({ taskType, status, result }) => {
+      // 当测速、订阅更新或节点添加任务完成时，自动刷新列表。
+      if (status === 'completed' && (taskType === 'speed_test' || taskType === 'sub_update' || taskType === 'node_add')) {
         handleRefresh();
+      }
+      if (taskType === 'node_add' && status === 'completed' && result) {
+        setAddResult(result);
+        setAddResultDialogOpen(true);
       }
     };
     registerOnComplete(onTaskComplete);
@@ -714,7 +721,7 @@ export default function NodeList() {
   const handleAddNode = () => {
     setIsEditNode(false);
     setCurrentNode(null);
-    setNodeForm({ name: '', remark: '', nameMode: 'link', link: '', dialerProxyName: '', group: '', mergeMode: '2', tags: [] });
+    setNodeForm({ name: '', remark: '', nameMode: 'link', link: '', dialerProxyName: '', group: '', skipTLSVerify: false, mergeMode: '2', tags: [] });
     setNodeDialogOpen(true);
   };
 
@@ -739,6 +746,7 @@ export default function NodeList() {
       link: node.Link?.split(',').join('\n') || '',
       dialerProxyName: node.DialerProxyName || '',
       group: node.Group || '',
+      skipTLSVerify: node.SkipTLSVerify || false,
       mergeMode: '1',
       tags: nodeTags
     });
@@ -999,6 +1007,7 @@ export default function NodeList() {
   };
 
   const handleSubmitNode = async () => {
+    if (submittingNode) return;
     // 检测是否是 WireGuard 配置文件格式（包含 [Interface] 和 [Peer]）
     const isWireGuardConfig = nodeForm.link.includes('[Interface]') && nodeForm.link.includes('[Peer]');
     // 检测是否是 Clash YAML 配置格式（包含 proxies: 关键字）
@@ -1029,6 +1038,8 @@ export default function NodeList() {
     const tagNames = (nodeForm.tags || []).map((t) => t.name || t).join(',');
 
     try {
+      setSubmittingNode(true);
+      setSubmitProgress({ current: 0, total: nodeLinks.length, link: '' });
       if (isEditNode) {
         const processedLink = nodeLinks.join(',');
         await updateNode({
@@ -1041,49 +1052,51 @@ export default function NodeList() {
           nameMode: nodeForm.nameMode || 'link',
           dialerProxyName: nodeForm.dialerProxyName.trim(),
           group: nodeForm.group.trim(),
+          skipTLSVerify: nodeForm.skipTLSVerify,
           tags: tagNames
         });
         showMessage(t('nodes.page.messages.updateSuccess'));
         setNodeDialogOpen(false);
         handleRefresh();
       } else {
-        // 收集所有链接的添加结果
-        const result = { added: 0, skipped: [], failed: [] };
-        for (const link of nodeLinks) {
-          try {
-            const res = await addNodes({
-              link,
-              name: nodeLinks.length === 1 ? nodeForm.name.trim() : '',
-              remark: nodeForm.remark.trim(),
-              nameMode: nodeLinks.length === 1 && nodeForm.name.trim() ? 'remark' : nodeForm.nameMode || 'link',
-              dialerProxyName: nodeForm.dialerProxyName.trim(),
-              group: nodeForm.group.trim(),
-              tags: tagNames
-            });
-            // 检查后端返回的跳过标记
-            if (res.data?.skipped) {
-              result.skipped.push(res.data.duplicateInfo);
-            } else {
-              result.added++;
-            }
-          } catch (error) {
-            result.failed.push({ link, error: error.message || t('nodes.page.messages.addFailed') });
-          }
-        }
+        const res = await addNodesAsync({
+          link: nodeLinks.join('\n'),
+          name: nodeLinks.length === 1 ? nodeForm.name.trim() : '',
+          remark: nodeForm.remark.trim(),
+          nameMode: nodeLinks.length === 1 && nodeForm.name.trim() ? 'remark' : nodeForm.nameMode || 'link',
+          dialerProxyName: nodeForm.dialerProxyName.trim(),
+          group: nodeForm.group.trim(),
+          skipTLSVerify: nodeForm.skipTLSVerify,
+          tags: tagNames
+        });
+        const taskId = res.data?.taskId;
         setNodeDialogOpen(false);
-        // 单条且全部成功时，仅显示简单提示
-        if (nodeLinks.length === 1 && result.added === 1) {
-          showMessage(t('nodes.page.messages.addSuccess'));
+        setSubmitProgress(null);
+        if (taskId) {
+          const task = res.data?.task || {};
+          updateTask(taskId, {
+            taskId,
+            taskType: 'node_add',
+            taskName: task.name || t('tasks.type.nodeAdd'),
+            status: task.status || 'running',
+            current: task.progress || 0,
+            total: task.total || nodeLinks.length,
+            currentItem: task.currentItem || '',
+            startTime: task.startedAt ? new Date(task.startedAt).getTime() : Date.now()
+          });
+          showMessage(t('nodes.page.messages.addTaskStarted'));
         } else {
-          // 多条链接或有跳过/失败时，弹出结果汇总面板
-          setAddResult(result);
-          setAddResultDialogOpen(true);
+          showMessage(t('nodes.page.messages.addFailed'), 'error');
         }
         handleRefresh();
+        return;
       }
     } catch (error) {
       console.error(error);
       showMessage(error.message || (isEditNode ? t('nodes.page.messages.updateFailed') : t('nodes.page.messages.addFailed')), 'error');
+    } finally {
+      setSubmittingNode(false);
+      setSubmitProgress(null);
     }
   };
 
@@ -1450,6 +1463,8 @@ export default function NodeList() {
         onClose={() => setNodeDialogOpen(false)}
         onSubmit={handleSubmitNode}
         onFetchProxyNodes={fetchProxyNodes}
+        submitting={submittingNode}
+        submitProgress={submitProgress}
       />
 
       {/* 测速设置对话框 */}

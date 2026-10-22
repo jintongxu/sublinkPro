@@ -599,6 +599,9 @@ func Run() {
 		} else {
 			// 创建注入配置的 index.html 处理函数
 			serveIndexHTML := func(c *gin.Context) {
+				c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+				c.Header("Pragma", "no-cache")
+				c.Header("Expires", "0")
 				data, err := fs.ReadFile(staticFiles, "index.html")
 				if err != nil {
 					_ = c.Error(err)
@@ -717,6 +720,11 @@ func Run() {
 				if filePath == "sw.js" {
 					c.Header("Service-Worker-Allowed", "/")
 				}
+				if filePath == "sw.js" || filePath == "registerSW.js" || filePath == "manifest.webmanifest" || strings.HasSuffix(filePath, ".html") {
+					c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+					c.Header("Pragma", "no-cache")
+					c.Header("Expires", "0")
+				}
 				// 如果是 HTML 文件，注入配置
 				if strings.HasSuffix(filePath, ".html") {
 					html := injectConfigToHTML(string(data), webBasePath)
@@ -738,6 +746,9 @@ func Run() {
 				return
 			}
 			// 注入配置到 SPA fallback
+			c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+			c.Header("Pragma", "no-cache")
+			c.Header("Expires", "0")
 			html := injectConfigToHTML(string(data), webBasePath)
 			c.Data(200, "text/html; charset=utf-8", []byte(html))
 		} else {

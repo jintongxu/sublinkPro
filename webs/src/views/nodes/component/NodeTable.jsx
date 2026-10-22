@@ -54,8 +54,32 @@ const getNodeTableFlexSx = () => ({
   '& > :nth-of-type(7)': { order: 5, flex: '1.8 1 0' },
   '& > :nth-of-type(8)': { order: 8, flex: '1 1 0' },
   '& > :nth-of-type(9)': { order: 9, flex: '1 1 0' },
-  '& > :nth-of-type(10)': { order: 10, flex: '1.2 1 0' }
+  '& > :nth-of-type(10)': { order: 10, flex: '1 1 0' },
+  '& > :nth-of-type(11)': {
+    order: 11,
+    flex: '0 0 176px',
+    minWidth: '176px !important',
+    overflow: 'visible !important',
+    textOverflow: 'clip !important'
+  }
 });
+
+const VALIDATION_STATUSES = ['untested', 'success', 'partial', 'failed', 'disabled'];
+
+const getValidationDisplay = (node, translate) => {
+  const rawStatus = String(node.ValidationStatus || node.validationStatus || 'untested').toLowerCase();
+  const status = VALIDATION_STATUSES.includes(rawStatus) ? rawStatus : 'untested';
+  const color = { untested: 'default', success: 'success', partial: 'warning', failed: 'error', disabled: 'default' }[status];
+  const reason = String(node.ValidationReason || node.validationReason || '')
+    .replace(/https?:\/\/[^\s]+/gi, '[redacted link]')
+    .replace(/(?:token|password|passwd|secret|credential)\s*[:=]\s*[^\s,;]+/gi, '[redacted credential]')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .trim()
+    .slice(0, 160);
+  const checkedAt = node.ValidationCheckAt || node.validationCheckAt;
+  const detail = [reason, checkedAt && translate('nodes.table.validationCheckedAt', { time: formatDateTime(checkedAt) })].filter(Boolean).join(' · ');
+  return { status, color, label: translate(`nodes.table.validationStatus.${status}`), detail };
+};
 
 /**
  * 桌面端节点表格（精简版）
@@ -109,7 +133,7 @@ export default function NodeTable({
       setResizing({
         columnKey,
         startX: e.clientX,
-        startWidth: columnWidths[columnKey],
+        startWidth: columnWidths[columnKey] || (columnKey === 'validation' ? 140 : 100),
         tableTop: tableRect?.top || 0,
         tableBottom: tableRect?.bottom || window.innerHeight
       });
@@ -284,7 +308,13 @@ export default function NodeTable({
             '& .MuiTableCell-paddingCheckbox .MuiCheckbox-root': { p: 0.5, display: 'flex', alignItems: 'center' },
             '& .MuiChip-root': { height: 22 },
             '& .MuiChip-label': { px: 0.75 },
-            '& .MuiIconButton-root': { p: 0.5 }
+            '& .MuiIconButton-root': { p: 0.5 },
+            '& .actions-cell': {
+              minWidth: '176px !important',
+              flexBasis: '176px !important',
+              overflow: 'visible !important',
+              textOverflow: 'clip !important'
+            }
           }}
         >
           <TableHead
@@ -434,6 +464,25 @@ export default function NodeTable({
                   {t('nodes.table.speed')}
                 </TableSortLabel>
                 <ResizeHandle columnKey="speed" />
+              </TableCell>
+              <TableCell
+                sx={{
+                  width: columnWidths.validation || 140,
+                  minWidth: 110,
+                  position: 'relative',
+                  bgcolor: resizing?.columnKey === 'validation' ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
+                  transition: 'background-color 0.15s ease'
+                }}
+                sortDirection={sortBy === 'validation' ? sortOrder : false}
+              >
+                <TableSortLabel
+                  active={sortBy === 'validation'}
+                  direction={sortBy === 'validation' ? sortOrder : 'asc'}
+                  onClick={() => onSort('validation')}
+                >
+                  {t('nodes.table.validation')}
+                </TableSortLabel>
+                <ResizeHandle columnKey="validation" />
               </TableCell>
               <TableCell className="actions-cell" sx={{ pr: 0.5 }}>
                 {t('nodes.table.actions')}
@@ -664,6 +713,19 @@ export default function NodeTable({
                       )}
                     </Box>
                   </TableCell>
+                  <TableCell
+                    sx={{
+                      width: columnWidths.validation || 140,
+                      maxWidth: columnWidths.validation || 140,
+                      minWidth: 110
+                    }}
+                  >
+                    {(() => {
+                      const validation = getValidationDisplay(node, t);
+                      const chip = <Chip label={validation.label} color={validation.color} variant="outlined" size="small" />;
+                      return validation.detail ? <Tooltip title={validation.detail} arrow>{chip}</Tooltip> : chip;
+                    })()}
+                  </TableCell>
                   {false && <TableCell>
                     {(() => {
                       const ipTypeDisplay = getIpTypeDisplay(node.IsBroadcast, node.QualityStatus, node.QualityFamily);
@@ -853,5 +915,6 @@ NodeTable.propTypes = {
   onEdit: PropTypes.func.isRequired,
   onDelete: PropTypes.func.isRequired,
   onViewDetails: PropTypes.func.isRequired,
-  onColumnResize: PropTypes.func.isRequired
+  onColumnResize: PropTypes.func.isRequired,
+  onOpenRawProtocol: PropTypes.func
 };

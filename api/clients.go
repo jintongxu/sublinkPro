@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -58,8 +59,35 @@ type resolvedPreparedResponse struct {
 }
 
 type mihomoBridgeOutput struct {
-	Body     []byte
-	Resolved resolvedPreparedResponse
+	Body        []byte
+	Resolved    resolvedPreparedResponse
+	Diagnostics []string
+}
+
+// clientDiagnostics is a bounded, deliberately generic accumulator. Remote
+// links may contain credentials, so diagnostics must never include URLs or raw
+// errors. They are exposed as an additive response header when a body exists.
+type clientDiagnostics struct{ items []string }
+
+func (d *clientDiagnostics) add(message string) {
+	if len(d.items) >= 8 || strings.TrimSpace(message) == "" {
+		return
+	}
+	d.items = append(d.items, message)
+}
+
+func (d *clientDiagnostics) addParse(result node.SubscriptionParseResult) {
+	for _, diagnostic := range result.Diagnostics {
+		d.add(diagnostic.Message)
+	}
+}
+
+func (d *clientDiagnostics) apply(c *gin.Context) {
+	if len(d.items) == 0 {
+		return
+	}
+	c.Header("X-Subscription-Diagnostics", strings.Join(d.items, " | "))
+	c.Header("X-Subscription-Diagnostics-Count", strconv.Itoa(len(d.items)))
 }
 
 const syntheticClashTemplate = `port: 7890
@@ -87,12 +115,16 @@ var (
 	syntheticTemplateErr  error
 )
 
-func getRemoteSubscription(ctx context.Context, link string) (*http.Response, error) {
+func getRemoteSubscription(ctx context.Context, link string, skipTLSVerify bool) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
 	if err != nil {
 		return nil, err
 	}
-	return http.DefaultClient.Do(req)
+	if !skipTLSVerify {
+		return http.DefaultClient.Do(req)
+	}
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} //nolint:gosec // 用户显式启用节点级证书跳过验证
+	return client.Do(req)
 }
 
 func setResolvedSubscriptionName(c *gin.Context, subName string) {
@@ -530,6 +562,7 @@ func renderPreparedV2ray(c *gin.Context, prepared preparedClientResponse) {
 	}
 	sub := resolved.Subscription
 	baselist := ""
+	var diagnostics clientDiagnostics
 	nodeNamePlan := buildClientNodeNamePlan(sub)
 
 	for idx, v := range sub.Nodes {
@@ -555,13 +588,18 @@ func renderPreparedV2ray(c *gin.Context, prepared preparedClientResponse) {
 			continue
 		//如果是订阅转换（以 http:// 或 https:// 开头，但不是HTTP/HTTPS代理节点）
 		case (strings.HasPrefix(v.Link, "http://") || strings.HasPrefix(v.Link, "https://")) && !protocol.IsHTTPLink(v.Link):
-			resp, err := getRemoteSubscription(c.Request.Context(), v.Link)
+			resp, err := getRemoteSubscription(c.Request.Context(), v.Link, v.SkipTLSVerify)
 			if err != nil {
 				utils.Error("Error getting link: %v", err)
-				return
+				diagnostics.add("remote subscription fetch failed")
+				continue
 			}
-			defer func() { _ = resp.Body.Close() }()
-			body, _ := io.ReadAll(resp.Body)
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if readErr != nil {
+				diagnostics.add("remote subscription read failed")
+				continue
+			}
 			nodes := utils.Base64Decode(string(body))
 			compatibleLinks := filterV2rayCompatibleLinks(strings.Split(nodes, "\n"))
 			if len(compatibleLinks) > 0 {
@@ -584,6 +622,7 @@ func renderPreparedV2ray(c *gin.Context, prepared preparedClientResponse) {
 		}
 		baselist = res
 	}
+	diagnostics.apply(c)
 	_, _ = c.Writer.WriteString(utils.Base64Encode(baselist))
 }
 
@@ -636,6 +675,9 @@ func renderPreparedClash(c *gin.Context, prepared preparedClientResponse) {
 	if !shouldWriteBody {
 		return
 	}
+	if len(bridge.Diagnostics) > 0 {
+		c.Header("X-Subscription-Diagnostics", strings.Join(bridge.Diagnostics, " | "))
+	}
 	_, _ = c.Writer.WriteString(string(bridge.Body))
 }
 
@@ -684,6 +726,7 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 	}
 	sub := resolved.Subscription
 	var urls []protocol.Urls
+	var diagnostics clientDiagnostics
 	nodeTemplateAssignments := readNodeTemplateAssignments(sub)
 
 	// 获取链式代理规则
@@ -778,18 +821,25 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 			continue
 		//如果是订阅转换（以 http:// 或 https:// 开头，但不是HTTP/HTTPS代理节点）
 		case (strings.HasPrefix(v.Link, "http://") || strings.HasPrefix(v.Link, "https://")) && !protocol.IsHTTPLink(v.Link):
-			resp, err := getRemoteSubscription(c.Request.Context(), v.Link)
+			resp, err := getRemoteSubscription(c.Request.Context(), v.Link, v.SkipTLSVerify)
 			if err != nil {
 				utils.Error("获取包含链接失败: %v", err)
+				diagnostics.add("remote subscription fetch failed")
 				continue
 			}
-			defer func() { _ = resp.Body.Close() }()
-			body, _ := io.ReadAll(resp.Body)
-			remoteURLs, parseErr := node.ParseSubscriptionPayload(body)
-			if parseErr != nil {
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if readErr != nil {
+				diagnostics.add("remote subscription read failed")
+				continue
+			}
+			parseResult, parseErr := node.ParseSubscriptionPayloadWithDiagnostics(body)
+			diagnostics.addParse(parseResult)
+			if parseErr != nil && len(parseResult.URLs) == 0 {
 				utils.Error("远程订阅解析失败: %v", parseErr)
 				continue
 			}
+			remoteURLs := parseResult.URLs
 			for _, remoteURL := range remoteURLs {
 				if dialerProxy != "" {
 					remoteURL.DialerProxyName = dialerProxy
@@ -864,7 +914,7 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 		}
 		DecodeClash = []byte(res)
 	}
-	return mihomoBridgeOutput{Body: DecodeClash, Resolved: resolved}, true, true
+	return mihomoBridgeOutput{Body: DecodeClash, Resolved: resolved, Diagnostics: diagnostics.items}, true, true
 }
 
 func renderPreparedConvertedClient(c *gin.Context, prepared preparedClientResponse) {
@@ -876,6 +926,9 @@ func renderPreparedConvertedClient(c *gin.Context, prepared preparedClientRespon
 	c.Writer.Header().Set("Content-Disposition", "inline; filename*=utf-8''"+url.QueryEscape(filename))
 	if !shouldWriteBody {
 		return
+	}
+	if len(bridge.Diagnostics) > 0 {
+		c.Header("X-Subscription-Diagnostics", strings.Join(bridge.Diagnostics, " | "))
 	}
 	subStoreConfig, _ := substore.EffectiveConfig()
 	client, err := substore.NewClient(subStoreConfig)
@@ -947,6 +1000,7 @@ func renderPreparedSurge(c *gin.Context, prepared preparedClientResponse) {
 	}
 	sub := resolved.Subscription
 	urls := []string{}
+	var diagnostics clientDiagnostics
 
 	nodeNamePlan := buildClientNodeNamePlan(sub)
 
@@ -970,13 +1024,18 @@ func renderPreparedSurge(c *gin.Context, prepared preparedClientResponse) {
 			continue
 		//如果是订阅转换（以 http:// 或 https:// 开头，但不是HTTP/HTTPS代理节点）
 		case (strings.HasPrefix(v.Link, "http://") || strings.HasPrefix(v.Link, "https://")) && !protocol.IsHTTPLink(v.Link):
-			resp, err := getRemoteSubscription(c.Request.Context(), v.Link)
+			resp, err := getRemoteSubscription(c.Request.Context(), v.Link, v.SkipTLSVerify)
 			if err != nil {
 				utils.Error("Error getting link: %v", err)
-				return
+				diagnostics.add("remote subscription fetch failed")
+				continue
 			}
-			defer func() { _ = resp.Body.Close() }()
-			body, _ := io.ReadAll(resp.Body)
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if readErr != nil {
+				diagnostics.add("remote subscription read failed")
+				continue
+			}
 			nodes := utils.Base64Decode(string(body))
 			links := strings.Split(nodes, "\n")
 			urls = append(urls, links...)
@@ -1009,6 +1068,7 @@ func renderPreparedSurge(c *gin.Context, prepared preparedClientResponse) {
 	// 如果包含头部更新信息
 	if strings.Contains(DecodeClash, "#!MANAGED-CONFIG") {
 		DecodeClash = withSurgeManagedConfigInterval(DecodeClash, resolveSubscriptionUpdateIntervalSeconds(sub.UpdateInterval))
+		diagnostics.apply(c)
 		_, _ = c.Writer.WriteString(DecodeClash)
 		return
 	}

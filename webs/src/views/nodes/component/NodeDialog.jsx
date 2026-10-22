@@ -5,13 +5,17 @@ import { useTheme } from '@mui/material/styles';
 import Autocomplete from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import CircularProgress from '@mui/material/CircularProgress';
 import Chip from '@mui/material/Chip';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
+import Alert from '@mui/material/Alert';
 import Typography from '@mui/material/Typography';
 import useResolvedColorScheme from 'hooks/useResolvedColorScheme';
 import { useTranslation } from 'react-i18next';
@@ -34,7 +38,9 @@ export default function NodeDialog({
   tagOptions,
   onClose,
   onSubmit,
-  onFetchProxyNodes
+  onFetchProxyNodes,
+  submitting = false,
+  submitProgress = null
 }) {
   const theme = useTheme();
   const { t } = useTranslation();
@@ -43,7 +49,7 @@ export default function NodeDialog({
   const fieldControlSx = getNodeFieldControlSx(tokens);
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth PaperProps={{ sx: getNodeDialogPaperSx(theme, tokens) }}>
+    <Dialog open={open} onClose={(event, reason) => { if (!submitting) onClose(event, reason); }} maxWidth="md" fullWidth PaperProps={{ sx: getNodeDialogPaperSx(theme, tokens) }}>
       <DialogTitle
         sx={{
           color: tokens.primaryText,
@@ -55,6 +61,14 @@ export default function NodeDialog({
         {isEdit ? t('nodes.dialog.editTitle') : t('nodes.dialog.addTitle')}
       </DialogTitle>
       <DialogContent dividers sx={{ bgcolor: 'transparent', borderColor: tokens.panelBorder }}>
+        {submitting && submitProgress && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            {t('nodes.dialog.submitting', {
+              current: submitProgress.current,
+              total: submitProgress.total
+            })}
+          </Alert>
+        )}
         <Stack spacing={2} sx={{ mt: 1 }}>
           {isEdit && (
             <Stack spacing={1.5}>
@@ -106,6 +120,16 @@ export default function NodeDialog({
             onChange={(e) => setNodeForm({ ...nodeForm, link: e.target.value })}
             placeholder={t('nodes.dialog.fields.linkPlaceholder')}
             sx={fieldControlSx}
+          />
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={nodeForm.skipTLSVerify || false}
+                onChange={(e) => setNodeForm({ ...nodeForm, skipTLSVerify: e.target.checked })}
+              />
+            }
+            label={t('nodes.dialog.fields.skipTLSVerify')}
+            sx={{ color: tokens.primaryText }}
           />
           <TextField
             fullWidth
@@ -203,9 +227,9 @@ export default function NodeDialog({
         </Stack>
       </DialogContent>
       <DialogActions sx={{ bgcolor: tokens.mutedPanelSurface, borderTop: '1px solid', borderColor: tokens.panelBorder }}>
-        <Button onClick={onClose}>{t('common.close')}</Button>
-        <Button variant="contained" onClick={onSubmit}>
-          {t('common.confirm')}
+        <Button onClick={onClose} disabled={submitting}>{t('common.close')}</Button>
+        <Button variant="contained" onClick={onSubmit} disabled={submitting} startIcon={submitting ? <CircularProgress size={16} color="inherit" /> : null}>
+          {submitting ? t('nodes.dialog.submittingButton') : t('common.confirm')}
         </Button>
       </DialogActions>
     </Dialog>
@@ -222,6 +246,7 @@ NodeDialog.propTypes = {
     link: PropTypes.string,
     dialerProxyName: PropTypes.string,
     group: PropTypes.string,
+    skipTLSVerify: PropTypes.bool,
     mergeMode: PropTypes.string,
     tags: PropTypes.array
   }).isRequired,
@@ -232,5 +257,7 @@ NodeDialog.propTypes = {
   tagOptions: PropTypes.array,
   onClose: PropTypes.func.isRequired,
   onSubmit: PropTypes.func.isRequired,
-  onFetchProxyNodes: PropTypes.func.isRequired
+  onFetchProxyNodes: PropTypes.func.isRequired,
+  submitting: PropTypes.bool,
+  submitProgress: PropTypes.shape({ current: PropTypes.number, total: PropTypes.number, link: PropTypes.string })
 };

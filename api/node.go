@@ -1,19 +1,204 @@
 package api
 
 import (
+	"context"
+	"crypto/tls"
 	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/netip"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sublink/database"
 	"sublink/models"
 	"sublink/node"
 	"sublink/node/protocol"
+	"sublink/services"
 	"sublink/services/unlock"
 	"sublink/utils"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 )
+
+// Node-add contracts are additive and intentionally independent from the legacy
+// {code,msg} response envelope. Keep these values stable for API consumers.
+type NodeAddStatus string
+
+const (
+	NodeAddStatusSuccess NodeAddStatus = "success"
+	NodeAddStatusPartial NodeAddStatus = "partial"
+	NodeAddStatusSkipped NodeAddStatus = "skipped"
+	NodeAddStatusInvalid NodeAddStatus = "invalid"
+	NodeAddStatusFailed  NodeAddStatus = "failed"
+)
+
+type NodeAddItemStatus string
+
+const (
+	NodeAddItemAdded   NodeAddItemStatus = "added"
+	NodeAddItemSkipped NodeAddItemStatus = "skipped"
+	NodeAddItemInvalid NodeAddItemStatus = "invalid"
+	NodeAddItemFailed  NodeAddItemStatus = "failed"
+)
+
+type NodeAddReason string
+
+const (
+	NodeAddReasonInvalidInput        NodeAddReason = "invalid_input"
+	NodeAddReasonUnsupportedProtocol NodeAddReason = "unsupported_protocol"
+	NodeAddReasonNetworkError        NodeAddReason = "network_error"
+	NodeAddReasonTLSError            NodeAddReason = "tls_error"
+	NodeAddReasonParseError          NodeAddReason = "parse_error"
+	NodeAddReasonDuplicate           NodeAddReason = "duplicate"
+	NodeAddReasonPersistenceError    NodeAddReason = "persistence_error"
+)
+
+type NodeAddDiagnostic struct {
+	Code      NodeAddReason `json:"code"`
+	Message   string        `json:"message,omitempty"`
+	Retryable bool          `json:"retryable,omitempty"`
+}
+
+type NodeAddItem struct {
+	Status     NodeAddItemStatus  `json:"status"`
+	Name       string             `json:"name,omitempty"`
+	Protocol   string             `json:"protocol,omitempty"`
+	NodeID     int                `json:"nodeId,omitempty"`
+	Reason     NodeAddReason      `json:"reason,omitempty"`
+	Diagnostic *NodeAddDiagnostic `json:"diagnostic,omitempty"`
+}
+
+type NodeAddResult struct {
+	Mode        string              `json:"mode,omitempty"`
+	Status      NodeAddStatus       `json:"status"`
+	Added       int                 `json:"added"`
+	Skipped     int                 `json:"skipped"`
+	Invalid     int                 `json:"invalid"`
+	Failed      int                 `json:"failed"`
+	Warnings    int                 `json:"warnings,omitempty"`
+	Items       []NodeAddItem       `json:"items,omitempty"`
+	Diagnostics []NodeAddDiagnostic `json:"diagnostics,omitempty"`
+	Retryable   bool                `json:"retryable,omitempty"`
+}
+
+const (
+	maxNodeAddText       = 256
+	maxNodeAddDiagnostic = 512
+)
+
+func splitNodeAddLinks(link string) []string {
+	trimmed := strings.TrimSpace(link)
+	if trimmed == "" {
+		return nil
+	}
+	if protocol.IsWireGuardConfig(trimmed) || strings.Contains(trimmed, "proxies:") {
+		return []string{trimmed}
+	}
+	links := strings.FieldsFunc(trimmed, func(r rune) bool { return r == '\r' || r == '\n' || r == ',' })
+	result := make([]string, 0, len(links))
+	for _, item := range links {
+		if item = strings.TrimSpace(item); item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func safeNodeAddTaskItem(link string, index int) string {
+	if parsed, err := url.Parse(strings.TrimSpace(link)); err == nil && parsed.Scheme != "" {
+		return SafeNodeAddURL(link)
+	}
+	return fmt.Sprintf("节点 %d", index+1)
+}
+
+func mergeNodeAddResult(target *NodeAddResult, item NodeAddResult) {
+	target.Added += item.Added
+	target.Skipped += item.Skipped
+	target.Invalid += item.Invalid
+	target.Failed += item.Failed
+	target.Warnings += item.Warnings
+	target.Items = append(target.Items, item.Items...)
+	target.Diagnostics = append(target.Diagnostics, item.Diagnostics...)
+	target.Retryable = target.Retryable || item.Retryable
+}
+
+func runNodeAddTask(taskID string, ctx context.Context, links []string, input nodeAddInput) {
+	tm := services.GetTaskManager()
+	result := NodeAddResult{Mode: "async"}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			_ = tm.FailTask(taskID, "节点添加任务异常终止")
+		}
+	}()
+	for index, link := range links {
+		if ctx.Err() != nil || tm.IsTaskCancelled(taskID) {
+			return
+		}
+		input.Link = link
+		mergeNodeAddResult(&result, processNodeAdd(ctx, input))
+		classifyNodeAddResult(&result)
+		_ = tm.UpdateProgress(taskID, index+1, safeNodeAddTaskItem(link, index), result)
+	}
+	if ctx.Err() != nil || tm.IsTaskCancelled(taskID) {
+		return
+	}
+	classifyNodeAddResult(&result)
+	_ = tm.CompleteTask(taskID, "节点添加任务完成", result)
+}
+
+// TruncateNodeAddText bounds untrusted text while preserving a clear marker.
+func TruncateNodeAddText(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	value = strings.TrimSpace(value)
+	if len([]rune(value)) <= limit {
+		return value
+	}
+	if limit <= 3 {
+		return string([]rune(value)[:limit])
+	}
+	return string([]rune(value)[:limit-3]) + "..."
+}
+
+// SafeNodeAddURL returns only scheme and authority. It never returns userinfo,
+// path, query, or fragment, which may contain credentials or subscription data.
+func SafeNodeAddURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" {
+		return TruncateNodeAddText("[redacted]", maxNodeAddText)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if u.Hostname() == "" {
+		return scheme + "://[redacted]"
+	}
+	host := u.Hostname()
+	if u.Port() != "" {
+		host += ":" + u.Port()
+	}
+	return TruncateNodeAddText(scheme+"://"+host, maxNodeAddText)
+}
+
+// SafeNodeAddError formats errors without exposing credential-bearing URLs.
+func SafeNodeAddError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	// Replace URL-like tokens first, including URLs embedded in parser errors.
+	re := regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://[^\s\]\)>,;]+`)
+	message = re.ReplaceAllStringFunc(message, SafeNodeAddURL)
+	credentialPattern := regexp.MustCompile(`(?i)(password|token|passwd|secret|credential)\s*[:=]\s*[^\s,;]+`)
+	message = credentialPattern.ReplaceAllString(message, "[redacted credential]")
+	return TruncateNodeAddText(message, maxNodeAddDiagnostic)
+}
 
 func normalizeResidentialType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -44,6 +229,140 @@ func normalizeIPType(value string) string {
 
 func normalizeUnlockStatus(value string) string {
 	return unlock.NormalizeUnlockStatus(value)
+}
+
+var disallowedSubscriptionPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("224.0.0.0/4"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("::/128"),
+	netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001::/32"),
+	netip.MustParsePrefix("2001:2::/48"),
+	netip.MustParsePrefix("2001:10::/28"),
+	netip.MustParsePrefix("2001:20::/28"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("fc00::/7"),
+	netip.MustParsePrefix("fec0::/10"),
+	netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("ff00::/8"),
+}
+
+func isDisallowedSubscriptionIP(ip net.IP) bool {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	addr = addr.Unmap()
+	if !addr.IsGlobalUnicast() {
+		return true
+	}
+	for _, prefix := range disallowedSubscriptionPrefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateSubscriptionDestination(ctx context.Context, rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Hostname() == "" || (!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) {
+		return errors.New("invalid subscription URL")
+	}
+	addresses, err := net.DefaultResolver.LookupIP(ctx, "ip", parsed.Hostname())
+	if err != nil || len(addresses) == 0 {
+		return errors.New("subscription host resolution failed")
+	}
+	for _, ip := range addresses {
+		if isDisallowedSubscriptionIP(ip) {
+			return errors.New("subscription destination is not allowed")
+		}
+	}
+	return nil
+}
+
+func fetchNodeSubscriptionPayload(ctx context.Context, rawURL string, skipTLSVerify bool) ([]byte, error) {
+	if err := validateSubscriptionDestination(ctx, rawURL); err != nil {
+		return nil, err
+	}
+	baseTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, errors.New("unsupported default HTTP transport")
+	}
+	transport := baseTransport.Clone()
+	baseDialer := &net.Dialer{Timeout: 8 * time.Second, KeepAlive: 30 * time.Second}
+	transport.DialContext = func(dialCtx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := net.DefaultResolver.LookupIP(dialCtx, "ip", host)
+		if err != nil || len(ips) == 0 {
+			return nil, errors.New("subscription host resolution failed")
+		}
+		for _, ip := range ips {
+			if isDisallowedSubscriptionIP(ip) {
+				return nil, errors.New("subscription destination is not allowed")
+			}
+		}
+		return baseDialer.DialContext(dialCtx, network, net.JoinHostPort(ips[0].String(), port))
+	}
+	if skipTLSVerify {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // explicitly requested per-node setting
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   12 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("too many subscription redirects")
+			}
+			return validateSubscriptionDestination(req.Context(), req.URL.String())
+		},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, errors.New("subscription request failed")
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+}
+
+func classifyNodeAddResult(result *NodeAddResult) {
+	switch {
+	case result.Added > 0 && (result.Invalid > 0 || result.Failed > 0 || result.Skipped > 0 || result.Warnings > 0):
+		result.Status = NodeAddStatusPartial
+	case result.Added > 0:
+		result.Status = NodeAddStatusSuccess
+	case result.Skipped > 0 && result.Invalid == 0 && result.Failed == 0:
+		result.Status = NodeAddStatusSkipped
+	case result.Failed > 0:
+		result.Status = NodeAddStatusFailed
+	default:
+		result.Status = NodeAddStatusInvalid
+	}
 }
 
 func failNodeNameConflict(c *gin.Context, err error) bool {
@@ -233,6 +552,7 @@ func NodeUpdadte(c *gin.Context) {
 	}
 	dialerProxyName := c.PostForm("dialerProxyName")
 	remark := strings.TrimSpace(c.PostForm("remark"))
+	skipTLSVerify := c.PostForm("skipTLSVerify") == "true"
 	oldDialerProxyName, hasOldDialerProxyName := c.GetPostForm("oldDialerProxyName")
 	if !hasOldDialerProxyName {
 		oldDialerProxyName = ""
@@ -309,6 +629,9 @@ func NodeUpdadte(c *gin.Context) {
 	}
 	Node.DialerProxyName = strings.TrimSpace(dialerProxyName)
 	Node.Group = group
+	if _, ok := c.GetPostForm("skipTLSVerify"); ok {
+		Node.SkipTLSVerify = skipTLSVerify
+	}
 	Node.Protocol = protocol.GetProtocolFromLink(link)
 
 	// 重新计算 ContentHash
@@ -481,6 +804,45 @@ func NodeGetIDs(c *gin.Context) {
 	utils.OkDetailed(c, "node ids get", ids)
 }
 
+// NodeAddAsync creates a persisted background task and returns immediately.
+func NodeAddAsync(c *gin.Context) {
+	if err := c.Request.ParseMultipartForm(8 << 20); err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		utils.FailWithMsg(c, "解析节点添加请求失败")
+		return
+	}
+	link := strings.TrimSpace(c.PostForm("link"))
+	links := splitNodeAddLinks(link)
+	if len(links) == 0 {
+		utils.FailWithMsg(c, "link  不能为空")
+		return
+	}
+	input := nodeAddInput{
+		Link:            links[0],
+		Name:            c.PostForm("name"),
+		NameMode:        c.PostForm("nameMode"),
+		DialerProxyName: strings.TrimSpace(c.PostForm("dialerProxyName")),
+		Remark:          strings.TrimSpace(c.PostForm("remark")),
+		Group:           c.PostForm("group"),
+		SkipTLSVerify:   c.PostForm("skipTLSVerify") == "true",
+		Tags:            c.PostForm("tags"),
+	}
+	task, ctx, err := services.GetTaskManager().CreateTask(models.TaskTypeNodeAdd, "添加节点", models.TaskTriggerManual, len(links))
+	if err != nil {
+		utils.FailWithMsg(c, "创建节点添加任务失败")
+		return
+	}
+	utils.OkDetailed(c, "节点添加任务已提交", gin.H{
+		"taskId": task.ID,
+		"task":   task,
+		"total":  len(links),
+	})
+	go func() {
+		// Let the HTTP response reach the client before fast tasks emit terminal SSE events.
+		time.Sleep(50 * time.Millisecond)
+		runNodeAddTask(task.ID, ctx, links, input)
+	}()
+}
+
 // 添加节点
 func NodeAdd(c *gin.Context) {
 	var Node models.Node
@@ -494,11 +856,55 @@ func NodeAdd(c *gin.Context) {
 	dialerProxyName := strings.TrimSpace(c.PostForm("dialerProxyName"))
 	remark := strings.TrimSpace(c.PostForm("remark"))
 	group := c.PostForm("group")
+	skipTLSVerify := c.PostForm("skipTLSVerify") == "true"
 	if link == "" {
 		utils.FailWithMsg(c, "link  不能为空")
 		return
 	}
 	userProvidedName := strings.TrimSpace(name) != ""
+
+	// Remote subscription URLs are processed independently and return structured outcomes.
+	if parsedURL, parseErr := url.Parse(link); parseErr == nil && (strings.EqualFold(parsedURL.Scheme, "http") || strings.EqualFold(parsedURL.Scheme, "https")) && !protocol.IsHTTPLink(link) {
+		result := NodeAddResult{Mode: "subscription"}
+		payload, fetchErr := fetchNodeSubscriptionPayload(c.Request.Context(), link, skipTLSVerify)
+		if fetchErr != nil {
+			result.Failed = 1
+			result.Diagnostics = []NodeAddDiagnostic{{Code: NodeAddReasonNetworkError, Message: SafeNodeAddError(fetchErr), Retryable: true}}
+			classifyNodeAddResult(&result)
+			utils.FailWithData(c, "远程订阅获取失败", result)
+			return
+		}
+		parsed, _ := node.ParseSubscriptionPayloadWithDiagnostics(payload)
+		for _, diagnostic := range parsed.Diagnostics {
+			result.Diagnostics = append(result.Diagnostics, NodeAddDiagnostic{Code: NodeAddReasonParseError, Message: TruncateNodeAddText(diagnostic.Message, maxNodeAddDiagnostic)})
+		}
+		for _, candidate := range parsed.URLs {
+			identity, identityErr := protocol.ExtractLinkIdentity(candidate.Url)
+			item := NodeAddItem{Name: identity.Name, Protocol: protocol.GetProtocolFromLink(candidate.Url)}
+			if identityErr != nil || item.Protocol == "" {
+				item.Status, item.Reason = NodeAddItemInvalid, NodeAddReasonInvalidInput
+				result.Invalid++
+				result.Items = append(result.Items, item)
+				continue
+			}
+			n := models.Node{Name: identity.Name, Remark: remark, NameMode: models.NodeNameModeLink, Link: candidate.Url, LinkName: identity.Name, LinkAddress: identity.Address, LinkHost: identity.Host, LinkPort: identity.Port, Protocol: item.Protocol, DialerProxyName: dialerProxyName, Group: group, SkipTLSVerify: skipTLSVerify, ClashExtra: candidate.ClashExtra, ValidationStatus: models.ValidationStatusSuccess, ValidationReason: "validated", ValidationCheckAt: time.Now().UTC().Format(time.RFC3339)}
+			if err := n.Add(); err != nil {
+				item.Status, item.Reason = NodeAddItemSkipped, NodeAddReasonDuplicate
+				result.Skipped++
+			} else {
+				item.Status, item.NodeID = NodeAddItemAdded, n.ID
+				result.Added++
+			}
+			result.Items = append(result.Items, item)
+		}
+		classifyNodeAddResult(&result)
+		if result.Added > 0 {
+			utils.OkDetailed(c, "订阅导入完成", result)
+		} else {
+			utils.FailWithData(c, "订阅未导入节点", result)
+		}
+		return
+	}
 
 	// 读取全局配置：是否启用跨机场去重（默认启用）
 	crossAirportDedupVal, _ := models.GetSetting("cross_airport_dedup_enabled")
@@ -545,6 +951,7 @@ func NodeAdd(c *gin.Context) {
 				n.LinkAddress = proxy.Server + ":" + n.LinkPort
 				n.DialerProxyName = dialerProxyName
 				n.Group = group
+				n.SkipTLSVerify = skipTLSVerify
 				n.Protocol = protocol.GetProtocolFromLink(proxyLink)
 
 				// 生成 ContentHash
@@ -563,6 +970,9 @@ func NodeAdd(c *gin.Context) {
 					}
 				}
 
+				n.ValidationStatus = models.ValidationStatusSuccess
+				n.ValidationReason = "validated"
+				n.ValidationCheckAt = time.Now().UTC().Format(time.RFC3339)
 				if err := n.Add(); err != nil {
 					failedCount++
 					continue
@@ -612,7 +1022,15 @@ func NodeAdd(c *gin.Context) {
 	Node.Link = link
 	Node.DialerProxyName = strings.TrimSpace(dialerProxyName)
 	Node.Group = group
+	Node.SkipTLSVerify = skipTLSVerify
 	Node.Protocol = protocol.GetProtocolFromLink(link)
+	if Node.Protocol == "" {
+		utils.FailWithData(c, "不支持的节点协议", NodeAddResult{Mode: "link", Status: NodeAddStatusInvalid, Invalid: 1, Items: []NodeAddItem{{Status: NodeAddItemInvalid, Name: Node.Name, Reason: NodeAddReasonUnsupportedProtocol}}})
+		return
+	}
+	Node.ValidationStatus = models.ValidationStatusSuccess
+	Node.ValidationReason = "validated"
+	Node.ValidationCheckAt = time.Now().UTC().Format(time.RFC3339)
 
 	// 生成 ContentHash（用于全库去重）
 	proxy, proxyErr := protocol.LinkToProxy(protocol.Urls{Url: link}, protocol.OutputConfig{})

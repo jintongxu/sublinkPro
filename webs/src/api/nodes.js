@@ -44,7 +44,7 @@ export function getNodeIds(params = {}) {
   });
 }
 
-// 添加节点
+// 添加节点（兼容旧版同步接口）
 export function addNodes(data) {
   const formData = new FormData();
   Object.keys(data).forEach((key) => {
@@ -54,6 +54,24 @@ export function addNodes(data) {
   });
   return request({
     url: '/v1/nodes/add',
+    method: 'post',
+    data: formData,
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  });
+}
+
+// 异步添加节点：立即返回任务 ID，后台继续处理
+export function addNodesAsync(data) {
+  const formData = new FormData();
+  Object.keys(data).forEach((key) => {
+    if (data[key] !== undefined && data[key] !== null) {
+      formData.append(key, data[key]);
+    }
+  });
+  return request({
+    url: '/v1/nodes/add-async',
     method: 'post',
     data: formData,
     headers: {

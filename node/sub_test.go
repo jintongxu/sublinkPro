@@ -701,6 +701,36 @@ func TestParseSubscriptionPayloadSupportsClashYAMLAndBase64(t *testing.T) {
 	}
 }
 
+func TestParseSubscriptionPayloadWithDiagnosticsRetainsValidLinks(t *testing.T) {
+	valid := GenerateProxyLink(protocol.Proxy{Name: "valid", Type: "trojan", Server: "valid.example.com", Port: 443, Password: "secret"})
+	result, err := ParseSubscriptionPayloadWithDiagnostics([]byte(valid + "\nnot-a-link\n" + valid))
+	if err != nil {
+		t.Fatalf("mixed payload should succeed: %v", err)
+	}
+	if len(result.URLs) != 2 {
+		t.Fatalf("valid URL count = %d, want 2", len(result.URLs))
+	}
+	if len(result.Diagnostics) == 0 || result.Diagnostics[0].Kind != "link" {
+		t.Fatalf("diagnostics = %#v, want invalid link diagnostic", result.Diagnostics)
+	}
+	for _, diagnostic := range result.Diagnostics {
+		if len(diagnostic.Message) > subscriptionDiagnosticMessageLimit {
+			t.Fatalf("diagnostic message exceeded bound: %d", len(diagnostic.Message))
+		}
+	}
+}
+
+func TestParseSubscriptionPayloadWithDiagnosticsBoundsErrors(t *testing.T) {
+	lines := strings.Repeat("not-a-link\n", subscriptionDiagnosticLimit+10)
+	result, err := ParseSubscriptionPayloadWithDiagnostics([]byte(lines))
+	if err == nil {
+		t.Fatal("expected no-node error")
+	}
+	if len(result.Diagnostics) != subscriptionDiagnosticLimit {
+		t.Fatalf("diagnostic count = %d, want %d", len(result.Diagnostics), subscriptionDiagnosticLimit)
+	}
+}
+
 func TestParseClashProviderPayloadSupportsPlainAndBase64Links(t *testing.T) {
 	link := GenerateProxyLink(protocol.Proxy{
 		Name:     "plain-provider-node",

@@ -59,6 +59,10 @@ type Node struct {
 	QualityFamily      string    `gorm:"size:16;default:''"`
 	UnlockSummary      string    `gorm:"type:text"`
 	UnlockCheckAt      string
+	SkipTLSVerify      bool   `gorm:"default:false" json:"SkipTLSVerify"`                 // 远程订阅节点是否跳过TLS证书验证
+	ValidationStatus   string `gorm:"size:16;default:'untested'" json:"ValidationStatus"` // 导入/订阅输出验证状态
+	ValidationReason   string `gorm:"type:text" json:"ValidationReason"`                  // 最近一次验证的脱敏原因
+	ValidationCheckAt  string `json:"ValidationCheckAt"`                                  // 最近一次验证时间
 }
 
 type NodeSelectorItem struct {
@@ -113,6 +117,12 @@ const (
 	QualityStatusPartial  = "partial"
 	QualityStatusFailed   = "failed"
 	QualityStatusDisabled = "disabled"
+
+	ValidationStatusUntested = "untested"
+	ValidationStatusSuccess  = "success"
+	ValidationStatusPartial  = "partial"
+	ValidationStatusFailed   = "failed"
+	ValidationStatusDisabled = "disabled"
 
 	QualityFamilyIPv4 = "ipv4"
 	QualityFamilyIPv6 = "ipv6"
@@ -483,6 +493,9 @@ func UpdateNodeFields(id int, updates map[string]any) error {
 // Add 添加节点
 func (node *Node) Add() error {
 	node.NormalizeNameModeDefaults()
+	if node.ValidationStatus == "" {
+		node.ValidationStatus = ValidationStatusUntested
+	}
 	node.DialerProxyName = strings.TrimSpace(node.DialerProxyName)
 	if err := EnsureNodeNameAvailable(node.Name, node.ID); err != nil {
 		return err
@@ -517,7 +530,10 @@ func (node *Node) Update() error {
 	node.syncLinkHash()
 	node.UpdatedAt = time.Now()
 	// Write-Through: 先写数据库
-	err := database.DB.Model(node).Select("Name", "Remark", "NameMode", "Link", "ClashExtra", "LinkHash", "DialerProxyName", "Group", "LinkName", "LinkAddress", "LinkHost", "LinkPort", "LinkCountry", "Protocol", "ContentHash", "UpdatedAt").Updates(node).Error
+	if node.ValidationStatus == "" {
+		node.ValidationStatus = ValidationStatusUntested
+	}
+	err := database.DB.Model(node).Select("Name", "Remark", "NameMode", "Link", "ClashExtra", "LinkHash", "DialerProxyName", "Group", "LinkName", "LinkAddress", "LinkHost", "LinkPort", "LinkCountry", "Protocol", "ContentHash", "SkipTLSVerify", "ValidationStatus", "ValidationReason", "ValidationCheckAt", "UpdatedAt").Updates(node).Error
 	if err != nil {
 		return err
 	}
@@ -538,6 +554,10 @@ func (node *Node) Update() error {
 		cachedNode.LinkCountry = node.LinkCountry
 		cachedNode.Protocol = node.Protocol
 		cachedNode.ContentHash = node.ContentHash
+		cachedNode.SkipTLSVerify = node.SkipTLSVerify
+		cachedNode.ValidationStatus = node.ValidationStatus
+		cachedNode.ValidationReason = node.ValidationReason
+		cachedNode.ValidationCheckAt = node.ValidationCheckAt
 		cachedNode.UpdatedAt = node.UpdatedAt
 		cachedNode.EffectiveNameValue = cachedNode.EffectiveName()
 		nodeCache.Set(node.ID, cachedNode)

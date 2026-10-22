@@ -1777,6 +1777,7 @@
         "updateSuccess": "Updated successfully",
         "updateFailed": "Update failed",
         "addSuccess": "Added successfully",
+        "addTaskStarted": "Node add task submitted. Track it from the task progress panel.",
         "addFailed": "Add failed",
         "speedConfigMoved": "Speed test configuration has moved to check strategy management",
         "speedTaskStarted": "Speed test task started in the background. Refresh later to view results.",
@@ -1792,6 +1793,8 @@
     },
     "dialog": {
       "addTitle": "Add Node",
+      "submitting": "Processing item {{current}} of {{total}}. Please wait…",
+      "submittingButton": "Processing…",
       "editTitle": "Edit Node",
       "fields": {
         "link": "Node link",
@@ -1800,6 +1803,7 @@
         "remarkNameHelper": "Custom remarks are saved in the Name field and will not be overwritten by airport updates.",
         "remark": "Node remark",
         "remarkPlaceholder": "For example: source, purpose, account notes",
+        "skipTLSVerify": "Skip TLS certificate verification (remote subscription links only)",
         "remarkHelper": "Separate from the node name; used only for notes about this node.",
         "nameMode": "Effective name",
         "nameModeHelper": "Controls which name subscription output, rename rules, scripts, and chain proxy use.",
@@ -1974,6 +1978,17 @@
         "edit": "Edit",
         "delete": "Delete"
       }
+    },
+    "addResult": {
+      "title": "Node add results",
+      "mode": "Mode: {{mode}}",
+      "successAll": "Added {{count}} nodes successfully.",
+      "unknownNode": "Unknown node",
+      "itemsTitle": "Item details",
+      "diagnostics": "Diagnostics",
+      "tlsValidated": "TLS was validated; output is ready.",
+      "tlsSavedUnverified": "Saved, but TLS was not verified. Review before using.",
+      "stats": { "received": "Received: {{count}}", "validated": "Validated: {{count}}", "added": "Added: {{count}}", "saved": "Saved: {{count}}", "output_ready": "Output-ready: {{count}}", "skipped": "Skipped: {{count}}", "invalid": "Invalid: {{count}}", "failed": "Failed: {{count}}", "warnings": "Warnings: {{count}}", "total": "Total: {{count}}" }
     },
     "rawProtocolDialog": {
       "title": "Protocol Parameters",
@@ -2308,6 +2323,15 @@
       "referencedBy": "Referenced by: {{names}}",
       "delay": "Delay",
       "speed": "Speed",
+      "validation": "Validation",
+      "validationCheckedAt": "Checked {{time}}",
+      "validationStatus": {
+        "untested": "Untested",
+        "success": "Valid",
+        "partial": "Partial",
+        "failed": "Failed",
+        "disabled": "Disabled"
+      },
       "actions": "Actions",
       "originalName": "Original: {{name}}",
       "remarkName": "Remark: {{name}}",
@@ -3907,7 +3931,8 @@
       "subUpdate": "Subscription update",
       "tagRule": "Tag rule",
       "dbMigration": "Database migration",
-      "webdavBackup": "WebDAV backup"
+      "webdavBackup": "WebDAV backup",
+      "nodeAdd": "Add nodes"
     },
     "trigger": {
       "manual": "Manual",
@@ -3943,6 +3968,9 @@
       "speedTestFailed": "Speed test failed",
       "latency": "{{latency}}ms",
       "added": "{{count}} added",
+      "skipped": "{{count}} skipped",
+      "invalid": "{{count}} invalid",
+      "failed": "{{count}} failed",
       "exists": "{{count}} existing",
       "deleted": "{{count}} deleted",
       "matchedNodes": "{{matched}}/{{total}} nodes matched",

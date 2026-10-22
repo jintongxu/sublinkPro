@@ -393,6 +393,42 @@ func RunMigrations() error {
 		utils.Error("执行迁移 0039_add_node_remark 失败: %v", err)
 	}
 
+	if err := database.RunCustomMigration("0040_add_node_skip_tls_verify", func() error {
+		if !db.Migrator().HasColumn(&Node{}, "SkipTLSVerify") {
+			if err := db.Migrator().AddColumn(&Node{}, "SkipTLSVerify"); err != nil {
+				return err
+			}
+		}
+		return db.Model(&Node{}).Where("skip_tls_verify IS NULL").Update("skip_tls_verify", false).Error
+	}); err != nil {
+		utils.Error("执行迁移 0040_add_node_skip_tls_verify 失败: %v", err)
+	}
+
+	if err := database.RunCustomMigration("0041_add_node_validation_status", func() error {
+		if !db.Migrator().HasColumn(&Node{}, "ValidationStatus") {
+			if err := db.Migrator().AddColumn(&Node{}, "ValidationStatus"); err != nil {
+				return err
+			}
+		}
+		if !db.Migrator().HasColumn(&Node{}, "ValidationReason") {
+			if err := db.Migrator().AddColumn(&Node{}, "ValidationReason"); err != nil {
+				return err
+			}
+		}
+		if !db.Migrator().HasColumn(&Node{}, "ValidationCheckAt") {
+			if err := db.Migrator().AddColumn(&Node{}, "ValidationCheckAt"); err != nil {
+				return err
+			}
+		}
+		return db.Model(&Node{}).Where("validation_status IS NULL OR validation_status = ''").Updates(map[string]any{
+			"validation_status":   ValidationStatusUntested,
+			"validation_reason":   "",
+			"validation_check_at": "",
+		}).Error
+	}); err != nil {
+		utils.Error("执行迁移 0041_add_node_validation_status 失败: %v", err)
+	}
+
 	if err := database.RunCustomMigration("0024_migrate_legacy_webhook_settings", func() error {
 		legacyURL, _ := GetSetting("webhook_url")
 		legacyMethod, _ := GetSetting("webhook_method")
