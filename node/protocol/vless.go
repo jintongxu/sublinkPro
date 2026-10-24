@@ -133,6 +133,9 @@ func buildVLESSProxy(link Urls, config OutputConfig) (Proxy, error) {
 	xhttpOpts := buildVLESSXHTTPOpts(vless.Query)
 	applyVLESSXHTTPSkipCertOverride(xhttpOpts, config.Cert)
 	realityOpts := map[string]any{"public-key": vless.Query.Pbk, "short-id": vless.Query.Sid}
+	if vless.Query.Security == "reality" {
+		realityOpts["support-x25519mlkem768"] = true
+	}
 	DeleteOpts(wsOpts)
 	DeleteOpts(h2Opts)
 	DeleteOpts(httpOpts)

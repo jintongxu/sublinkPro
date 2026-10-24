@@ -98,11 +98,11 @@ func TestExtractLinkIdentity(t *testing.T) {
 		wantPort     string
 	}{
 		{
-			name:         "vmess identity preserves current host semantics",
+			name:         "vmess identity uses server address",
 			link:         EncodeVmessURL(Vmess{Add: "vmess-server.example", Host: "ws-host.example", Port: 443, Id: "88888888-9999-7777-5555-777777777777", Ps: "vmess-node", V: "2"}),
 			wantProtocol: "vmess",
 			wantName:     "vmess-node",
-			wantHost:     "ws-host.example",
+			wantHost:     "vmess-server.example",
 			wantPort:     "443",
 		},
 		{

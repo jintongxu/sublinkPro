@@ -77,6 +77,17 @@ func TestVlessCertificateFingerprintAliases(t *testing.T) {
 	assertContains(t, "EncodedCertificateFingerprint", reEncoded, "pcs="+fingerprint)
 }
 
+func TestVlessRealityEnablesX25519MLKEM768(t *testing.T) {
+	url := "vless://12345678-1234-1234-1234-123456789abc@example.com:443?encryption=none&security=reality&type=tcp&flow=xtls-rprx-vision&pbk=testpublickey&sid=testshortid&sni=example.com&fp=chrome#Reality节点"
+
+	proxy, err := buildVLESSProxy(Urls{Url: url}, OutputConfig{})
+	if err != nil {
+		t.Fatalf("buildVLESSProxy 失败: %v", err)
+	}
+
+	assertEqualBool(t, "SupportX25519MLKEM768", true, mustBool(t, "SupportX25519MLKEM768", proxy.Reality_opts["support-x25519mlkem768"]))
+}
+
 func TestVlessCertificateFingerprintPrefersValidPCS(t *testing.T) {
 	const pcs = "16dac3717024eb319093d1c95290c14adc850e2814b2208d11c7b7a436923859"
 	const hpkp = "78443c6c21bd739a9d3d07ecdba487aa1fe75aed671e484151a61f24d114b39d"
