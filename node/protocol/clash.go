@@ -313,6 +313,23 @@ func proxyAssignedToGroup(assignments map[string][]string, proxyName, groupName 
 	return false
 }
 
+// groupMemberCandidates returns the node names eligible for automatic membership
+// of one proxy group. Front (dialer) proxies stay out of the generated groups
+// unless the node is explicitly assigned to that group.
+func groupMemberCandidates(autoNames, allNames []string, assignments map[string][]string, groupName string, excludedProxyNames map[string]bool) []string {
+	members := make([]string, 0, len(autoNames))
+	members = append(members, autoNames...)
+	for _, name := range allNames {
+		if !excludedProxyNames[name] {
+			continue
+		}
+		if proxyAssignedToGroup(assignments, name, groupName) {
+			members = append(members, name)
+		}
+	}
+	return members
+}
+
 func shouldPreserveProxyGroup(proxyGroup map[string]any) bool {
 	for _, field := range []string{"include-all", "include-all-proxies", "include-all-providers"} {
 		if isTruthyConfigValue(proxyGroup[field]) {
@@ -511,6 +528,8 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 	}
 	// 定义一个代理列表名字。前置节点保留在 proxies 中，但不加入自动生成的代理组。
 	ProxiesNameList := []string{}
+	// allProxyNames 包含前置节点，仅用于解析显式分配到某个代理组的成员。
+	allProxyNames := make([]string, 0, len(proxys))
 	proxyNameSet := make(map[string]struct{})
 	excludedProxyNames := make(map[string]bool, len(excludedNames))
 	for _, name := range excludedNames {
@@ -518,6 +537,7 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 	}
 	for _, p := range proxys {
 		proxyNameSet[p.Name] = struct{}{}
+		allProxyNames = append(allProxyNames, p.Name)
 		if !excludedProxyNames[p.Name] {
 			ProxiesNameList = append(ProxiesNameList, p.Name)
 		}
@@ -635,15 +655,22 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 			continue
 		}
 
-		// 前置节点可以保留在 proxies 定义中供 dialer-proxy 引用，
-		// 但不应出现在普通显式节点代理组中。
+		groupName, _ := proxyGroup["name"].(string)
+		// 前置节点可以保留在 proxies 定义中供 dialer-proxy 引用，默认不出现在
+		// 普通代理组里；只有被显式分配到该组的前置节点才保留。
 		if existingProxies, ok := proxyGroup["proxies"].([]any); ok && len(excludedProxyNames) > 0 {
 			filteredProxies := make([]any, 0, len(existingProxies))
 			for _, proxy := range existingProxies {
 				name, isName := proxy.(string)
-				if !isName || !excludedProxyNames[strings.TrimSpace(name)] {
+				if !isName {
 					filteredProxies = append(filteredProxies, proxy)
+					continue
 				}
+				trimmed := strings.TrimSpace(name)
+				if excludedProxyNames[trimmed] && !proxyAssignedToGroup(assignments, trimmed, groupName) {
+					continue
+				}
+				filteredProxies = append(filteredProxies, proxy)
 			}
 			proxyGroup["proxies"] = filteredProxies
 		}
@@ -659,10 +686,10 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 
 		// Disabled assignment mode preserves the template's dynamic semantics.
 		if !strictAssignments && shouldPreserveProxyGroup(proxyGroup) {
-			groupName, _ := proxyGroup["name"].(string)
+			members := groupMemberCandidates(ProxiesNameList, allProxyNames, assignments, groupName, excludedProxyNames)
 			existing, _ := proxyGroup["proxies"].([]any)
-			filteredExisting := make([]any, 0, len(existing)+len(ProxiesNameList))
-			seen := make(map[string]struct{}, len(existing)+len(ProxiesNameList))
+			filteredExisting := make([]any, 0, len(existing)+len(members))
+			seen := make(map[string]struct{}, len(existing)+len(members))
 			for _, item := range existing {
 				if name, ok := item.(string); ok {
 					if _, assigned := assignments[name]; assigned && !proxyAssignedToGroup(assignments, name, groupName) {
@@ -675,7 +702,7 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 				}
 				filteredExisting = append(filteredExisting, item)
 			}
-			for _, name := range ProxiesNameList {
+			for _, name := range members {
 				if proxyAssignedToGroup(assignments, name, groupName) {
 					if _, exists := seen[name]; !exists {
 						filteredExisting = append(filteredExisting, name)
@@ -689,6 +716,10 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 
 			patternNames := make([]string, 0, len(excludedProxyNames)+len(assignments))
 			for name := range excludedProxyNames {
+				// 显式分配到该组的前置节点不能被排除过滤器再次剔除。
+				if proxyAssignedToGroup(assignments, strings.TrimSpace(name), groupName) {
+					continue
+				}
 				patternNames = append(patternNames, regexp.QuoteMeta(strings.TrimSpace(name)))
 			}
 			for name := range assignments {
@@ -709,9 +740,10 @@ func decodeClashWithOptions(proxys []Proxy, yamlfile string, customGroups [][]Cu
 		// In strict mode, only explicitly assigned nodes are emitted in ordinary groups;
 		// otherwise assigned nodes are filtered while unassigned nodes retain legacy behavior.
 		groupNodeNames := ProxiesNameList
-		if groupName, ok := proxyGroup["name"].(string); ok && (len(assignments) > 0 || strictAssignments) {
-			groupNodeNames = make([]string, 0, len(ProxiesNameList))
-			for _, name := range ProxiesNameList {
+		if len(assignments) > 0 || strictAssignments {
+			candidates := groupMemberCandidates(ProxiesNameList, allProxyNames, assignments, groupName, excludedProxyNames)
+			groupNodeNames = make([]string, 0, len(candidates))
+			for _, name := range candidates {
 				if strictAssignments {
 					if !proxyAssignedToGroup(assignments, name, groupName) {
 						continue

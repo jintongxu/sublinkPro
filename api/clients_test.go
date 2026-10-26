@@ -1623,3 +1623,77 @@ func useLocalSubscriptionFetch(t *testing.T) {
 	subscriptionFetch = func(req *http.Request, client *http.Client) (*http.Response, error) { return client.Do(req) }
 	t.Cleanup(func() { subscriptionFetch = old })
 }
+
+// TestBuildPreparedMihomoYAMLKeepsExplicitlySelectedFrontProxyInGroups verifies
+// that a node the user selected directly stays visible in generated proxy groups
+// even when another node uses it as a dialer-proxy front.
+func TestBuildPreparedMihomoYAMLKeepsExplicitlySelectedFrontProxyInGroups(t *testing.T) {
+	setupClientsAPITestDB(t)
+	utils.SetProtocolLinkFuncs(protocol.GetProtocolLabelFromLink, protocol.RenameNodeLink)
+	t.Cleanup(func() {
+		utils.SetProtocolLinkFuncs(nil, nil)
+	})
+
+	front := "ss://YWVzLTEyOC1nY206cGFzc0Bmcm9udC5leGFtcGxlLmNvbTo0NDM=#front"
+	target := "ss://YWVzLTEyOC1nY206cGFzc0B0YXJnZXQuZXhhbXBsZS5jb206NDQz#target"
+
+	nodes := []models.Node{
+		{ID: 1, Name: "front", LinkName: "front", Link: front, Protocol: "ss"},
+		{ID: 2, Name: "target", LinkName: "target", Link: target, Protocol: "ss", DialerProxyName: "front"},
+	}
+
+	render := func(explicitIDs string) map[string]bool {
+		t.Helper()
+		templatePath := writeTestClashTemplate(t)
+		gin.SetMode(gin.TestMode)
+		recorder := httptest.NewRecorder()
+		ginContext, _ := gin.CreateTestContext(recorder)
+		ginContext.Request = httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/c/?client=clash", nil)
+		bridge, _, ok := buildPreparedMihomoYAML(ginContext, preparedClientResponse{
+			ClientType: "clash",
+			Mode:       clientResponseNormal,
+			SubName:    "explicit-front-sub",
+			Subscription: models.Subcription{
+				Name:                  "explicit-front-sub",
+				Config:                `{"clash":"` + templatePath + `"}`,
+				RefreshUsageOnRequest: false,
+				ExplicitNodeIDs:       explicitIDs,
+				Nodes:                 nodes,
+			},
+		})
+		if !ok {
+			t.Fatal("build prepared Mihomo YAML failed")
+		}
+		var config struct {
+			ProxyGroups []struct {
+				Name    string   `yaml:"name"`
+				Proxies []string `yaml:"proxies"`
+			} `yaml:"proxy-groups"`
+		}
+		if err := yaml.Unmarshal(bridge.Body, &config); err != nil {
+			t.Fatalf("parse clash output: %v", err)
+		}
+		members := make(map[string]bool)
+		for _, group := range config.ProxyGroups {
+			for _, proxy := range group.Proxies {
+				members[proxy] = true
+			}
+		}
+		return members
+	}
+
+	// front is only a dependency here, so it stays hidden from generated groups.
+	dependencyOnly := render("")
+	if dependencyOnly["front"] {
+		t.Fatalf("dependency-only front proxy must stay hidden: %#v", dependencyOnly)
+	}
+	if !dependencyOnly["target"] {
+		t.Fatalf("landing node must stay visible: %#v", dependencyOnly)
+	}
+
+	// Selecting front directly must keep it visible in the generated groups.
+	explicitlySelected := render(`[1,2]`)
+	if !explicitlySelected["front"] {
+		t.Fatalf("explicitly selected front proxy must stay visible: %#v", explicitlySelected)
+	}
+}

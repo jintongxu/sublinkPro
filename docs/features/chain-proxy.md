@@ -90,6 +90,8 @@ A subscription can contain multiple ordered policies, for example `Hong Kong rel
 
 When you select a node with a configured `dialer-proxy` in the subscription node selector, the system automatically includes a uniquely matched front-proxy node in the submitted subscription node set. This prevents the generated configuration from referencing a missing proxy. Automatically included dependencies are hidden from the “selected nodes” list; if the name cannot be matched uniquely, such as a policy-group name, no node is added automatically.
 
+Front proxies are kept in the `proxies` definition so `dialer-proxy` can reference them, but they are excluded from the auto-generated proxy groups. To expose one, assign it explicitly to a proxy group in “Custom proxy group node assignment”: the dependency nodes appear in that candidate list and are marked as front dependencies. A front node assigned to a group stays in that group, while every other group still excludes it, so a group that contains only front proxies can be built on purpose. The same rule applies to template groups with `include-all`/`filter` placeholders, and the assignment also overrides the group's `exclude-filter` exclusion for that node.
+
 ### Common examples
 
 | Goal | Intermediate node condition | Target node condition |

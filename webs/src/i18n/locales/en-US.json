@@ -2869,7 +2869,10 @@
       "loading": "Loading node list...",
       "noMatch": "No matching nodes found",
       "noSelected": "No selected nodes yet",
-      "airportSource": "Airport: {{source}}"
+      "airportSource": "Airport: {{source}}",
+      "frontOnly": "Front proxies only",
+      "filteredCount": "Showing {{shown}} / {{total}}",
+      "resetFilters": "Reset filters"
     },
     "clientUrls": {
       "defaultTitle": "Clients (click QR code to get address)",
@@ -3200,7 +3203,13 @@
         "confirm": "Confirm"
       },
       "nodes": {
-        "loading": "Loading nodes..."
+        "loading": "Loading nodes...",
+        "selectedList": "Selected nodes ({{count}})",
+        "selectedListEmpty": "No nodes selected yet",
+        "frontDependency": "Front dependency",
+        "groupOnlyFront": "Front proxies only",
+        "unassigned": "Unassigned",
+        "moreNodes": "+{{count}} more"
       }
     }
   },

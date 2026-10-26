@@ -9,19 +9,22 @@ import Paper from '@mui/material/Paper';
 import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
 import Checkbox from '@mui/material/Checkbox';
+import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
 import Typography from '@mui/material/Typography';
 import InputAdornment from '@mui/material/InputAdornment';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
 import ListItemIcon from '@mui/material/ListItemIcon';
-import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import Fade from '@mui/material/Fade';
 import Tooltip from '@mui/material/Tooltip';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import useResolvedColorScheme from 'hooks/useResolvedColorScheme';
 import { getSurfaceTokens } from 'themes/surfaceTokens';
 import { withAlpha } from '../../../utils/colorUtils';
@@ -49,6 +52,12 @@ export default function NodeTransferBox({
   checkedSelected,
   selectedNodeSearch,
   onSelectedNodeSearchChange,
+  selectedNodeGroupFilter = 'all',
+  onSelectedNodeGroupFilterChange = () => {},
+  selectedNodeSourceFilter = 'all',
+  onSelectedNodeSourceFilterChange = () => {},
+  selectedNodeFrontOnly = false,
+  onSelectedNodeFrontOnlyChange = () => {},
   mobileTab,
   onMobileTabChange,
   matchDownMd,
@@ -152,6 +161,14 @@ export default function NodeTransferBox({
     }
   };
 
+  const selectedFilterControlSx = {
+    '& .MuiOutlinedInput-root': {
+      borderRadius: 2,
+      bgcolor: mutedPanelSurface,
+      '& fieldset': { borderColor: panelBorder }
+    }
+  };
+
   const actionStripSx = {
     mt: 2,
     p: 1.5,
@@ -230,16 +247,6 @@ export default function NodeTransferBox({
       }
     };
   };
-  const desktopActionStripSx = {
-    width: '100%',
-    p: 1.5,
-    borderRadius: 3,
-    bgcolor: mutedPanelSurface,
-    border: '1px solid',
-    borderColor: panelBorder,
-    boxShadow: isDark ? insetHighlight : theme.shadows[1]
-  };
-
   const mobileTabsSx = {
     mb: 2,
     p: 0.5,
@@ -297,10 +304,40 @@ export default function NodeTransferBox({
   });
 
   const filteredSelectedNodes = useMemo(() => {
-    if (!selectedNodeSearch) return selectedNodesList;
-    const query = selectedNodeSearch.toLowerCase();
-    return selectedNodesList.filter((node) => node.Name?.toLowerCase().includes(query) || node.Group?.toLowerCase().includes(query));
-  }, [selectedNodesList, selectedNodeSearch]);
+    const query = (selectedNodeSearch || '').trim().toLowerCase();
+    return (selectedNodesList || []).filter((node) => {
+      if (selectedNodeGroupFilter !== 'all' && String(node.Group || '') !== selectedNodeGroupFilter) return false;
+      if (selectedNodeSourceFilter !== 'all' && String(node.Source || '') !== selectedNodeSourceFilter) return false;
+      if (selectedNodeFrontOnly && !String(node.DialerProxyName || '').trim()) return false;
+      if (!query) return true;
+      return [node.Name, node.EffectiveName, node.LinkName, node.Group, node.Source, node.DialerProxyName]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    });
+  }, [selectedNodesList, selectedNodeSearch, selectedNodeGroupFilter, selectedNodeSourceFilter, selectedNodeFrontOnly]);
+
+  const selectedNodeGroupOptions = useMemo(
+    () => Array.from(new Set((selectedNodesList || []).map((node) => String(node.Group || '')).filter(Boolean))).sort(),
+    [selectedNodesList]
+  );
+
+  const selectedNodeSourceOptions = useMemo(
+    () => Array.from(new Set((selectedNodesList || []).map((node) => String(node.Source || '')).filter(Boolean))).sort(),
+    [selectedNodesList]
+  );
+
+  const selectedFilterActive =
+    Boolean((selectedNodeSearch || '').trim()) ||
+    selectedNodeGroupFilter !== 'all' ||
+    selectedNodeSourceFilter !== 'all' ||
+    selectedNodeFrontOnly;
+
+  const resetSelectedFilters = () => {
+    onSelectedNodeSearchChange('');
+    onSelectedNodeGroupFilterChange('all');
+    onSelectedNodeSourceFilterChange('all');
+    onSelectedNodeFrontOnlyChange(false);
+  };
 
   const getNodeSecondaryText = (node) => {
     const isAirportNode = String(node.Group || '').trim() === '机场';
@@ -312,29 +349,174 @@ export default function NodeTransferBox({
 
   const handleMobileTabChange = (_event, nextTab) => onMobileTabChange(nextTab);
   const handleSelectedNodeSearchChange = (event) => onSelectedNodeSearchChange(event.target.value);
-  const availablePagination = availableNodePageCount > 1 ? (
-    <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ mt: 1 }}>
-      <Button
-        size="small"
-        variant="text"
-        disabled={availableNodePage <= 1 || selectorNodesLoading}
-        onClick={() => onAvailableNodePageChange(availableNodePage - 1)}
-      >
-        {t('common.previous', '上一页')}
-      </Button>
-      <Typography variant="caption" color="text.secondary">
-        {availableNodePage} / {availableNodePageCount}
-      </Typography>
-      <Button
-        size="small"
-        variant="text"
-        disabled={availableNodePage >= availableNodePageCount || selectorNodesLoading}
-        onClick={() => onAvailableNodePageChange(availableNodePage + 1)}
-      >
-        {t('common.next', '下一页')}
-      </Button>
-    </Stack>
-  ) : null;
+
+  const renderSelectedFilters = ({ compact = false } = {}) => {
+    if (compact) {
+      return (
+        <Stack spacing={1} sx={{ mb: 1.5 }}>
+          <TextField
+            fullWidth
+            size="small"
+            placeholder={t('subscriptions.transfer.searchSelected')}
+            value={selectedNodeSearch}
+            onChange={handleSelectedNodeSearchChange}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" color="action" />
+                </InputAdornment>
+              )
+            }}
+            sx={{ ...searchFieldSx, mb: 0 }}
+          />
+          <Stack direction="row" spacing={1}>
+            <FormControl size="small" fullWidth sx={selectedFilterControlSx}>
+              <Select
+                value={selectedNodeGroupFilter}
+                displayEmpty
+                renderValue={(val) =>
+                  val === 'all' ? t('subscriptions.form.nodeSelection.nodeGroupAll', { count: selectedNodeGroupOptions.length }) : val
+                }
+                onChange={(e) => onSelectedNodeGroupFilterChange(e.target.value)}
+              >
+                <MenuItem value="all">
+                  {t('subscriptions.form.nodeSelection.nodeGroupAll', { count: selectedNodeGroupOptions.length })}
+                </MenuItem>
+                {selectedNodeGroupOptions.map((g) => (
+                  <MenuItem key={g} value={g}>
+                    {g}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth sx={selectedFilterControlSx}>
+              <Select
+                value={selectedNodeSourceFilter}
+                displayEmpty
+                renderValue={(val) => (val === 'all' ? t('subscriptions.form.nodeSelection.nodeSourceAll') : val)}
+                onChange={(e) => onSelectedNodeSourceFilterChange(e.target.value)}
+              >
+                <MenuItem value="all">{t('subscriptions.form.nodeSelection.nodeSourceAll')}</MenuItem>
+                {selectedNodeSourceOptions.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {s}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Stack>
+          <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+            <Chip
+              size="small"
+              variant={selectedNodeFrontOnly ? 'filled' : 'outlined'}
+              color={selectedNodeFrontOnly ? 'secondary' : 'default'}
+              label={t('subscriptions.transfer.frontOnly')}
+              onClick={() => onSelectedNodeFrontOnlyChange(!selectedNodeFrontOnly)}
+              sx={{ cursor: 'pointer' }}
+            />
+            {selectedFilterActive && (
+              <Button size="small" variant="text" onClick={resetSelectedFilters}>
+                {t('subscriptions.transfer.resetFilters')}
+              </Button>
+            )}
+          </Stack>
+        </Stack>
+      );
+    }
+
+    return (
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25, flexShrink: 0 }}>
+        <TextField
+          size="small"
+          placeholder={t('subscriptions.transfer.searchSelected')}
+          value={selectedNodeSearch}
+          onChange={handleSelectedNodeSearchChange}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" color="action" />
+              </InputAdornment>
+            ),
+            sx: { height: 34, fontSize: '0.825rem' }
+          }}
+          sx={{ ...searchFieldSx, mb: 0, flex: 1, minWidth: 0 }}
+        />
+        <FormControl size="small" sx={{ minWidth: 108, maxWidth: 130, flexShrink: 0, ...selectedFilterControlSx }}>
+          <Select
+            value={selectedNodeGroupFilter}
+            displayEmpty
+            renderValue={(val) => (val === 'all' ? t('subscriptions.form.nodeSelection.nodeGroupFilter') : val)}
+            onChange={(e) => onSelectedNodeGroupFilterChange(e.target.value)}
+            sx={{ height: 34, fontSize: '0.8rem' }}
+          >
+            <MenuItem value="all">
+              {t('subscriptions.form.nodeSelection.nodeGroupAll', { count: selectedNodeGroupOptions.length })}
+            </MenuItem>
+            {selectedNodeGroupOptions.map((g) => (
+              <MenuItem key={g} value={g}>
+                {g}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 100, maxWidth: 120, flexShrink: 0, ...selectedFilterControlSx }}>
+          <Select
+            value={selectedNodeSourceFilter}
+            displayEmpty
+            renderValue={(val) => (val === 'all' ? t('subscriptions.form.nodeSelection.nodeSourceFilter') : val)}
+            onChange={(e) => onSelectedNodeSourceFilterChange(e.target.value)}
+            sx={{ height: 34, fontSize: '0.8rem' }}
+          >
+            <MenuItem value="all">{t('subscriptions.form.nodeSelection.nodeSourceAll')}</MenuItem>
+            {selectedNodeSourceOptions.map((s) => (
+              <MenuItem key={s} value={s}>
+                {s}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <Chip
+          size="small"
+          variant={selectedNodeFrontOnly ? 'filled' : 'outlined'}
+          color={selectedNodeFrontOnly ? 'secondary' : 'default'}
+          label={t('subscriptions.transfer.frontOnly')}
+          onClick={() => onSelectedNodeFrontOnlyChange(!selectedNodeFrontOnly)}
+          sx={{ height: 32, cursor: 'pointer', flexShrink: 0, fontWeight: 500 }}
+        />
+        {selectedFilterActive && (
+          <Tooltip title={t('subscriptions.transfer.resetFilters')} arrow>
+            <IconButton size="small" onClick={resetSelectedFilters} sx={{ p: 0.5, flexShrink: 0 }}>
+              <RestartAltIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+      </Stack>
+    );
+  };
+  const availablePagination =
+    availableNodePageCount > 1 ? (
+      <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ mt: 1 }}>
+        <Button
+          size="small"
+          variant="text"
+          disabled={availableNodePage <= 1 || selectorNodesLoading}
+          onClick={() => onAvailableNodePageChange(availableNodePage - 1)}
+        >
+          {t('common.previous', '上一页')}
+        </Button>
+        <Typography variant="caption" color="text.secondary">
+          {availableNodePage} / {availableNodePageCount}
+        </Typography>
+        <Button
+          size="small"
+          variant="text"
+          disabled={availableNodePage >= availableNodePageCount || selectorNodesLoading}
+          onClick={() => onAvailableNodePageChange(availableNodePage + 1)}
+        >
+          {t('common.next', '下一页')}
+        </Button>
+      </Stack>
+    ) : null;
 
   if (matchDownMd) {
     return (
@@ -457,21 +639,7 @@ export default function NodeTransferBox({
 
         <Fade in={mobileTab === 1}>
           <Box sx={{ display: mobileTab === 1 ? 'block' : 'none' }}>
-            <TextField
-              fullWidth
-              size="small"
-              placeholder={t('subscriptions.transfer.searchSelected')}
-              value={selectedNodeSearch}
-              onChange={handleSelectedNodeSearchChange}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon color="action" />
-                  </InputAdornment>
-                )
-              }}
-              sx={searchFieldSx}
-            />
+            {renderSelectedFilters({ compact: true })}
             <Paper
               elevation={0}
               sx={{
@@ -584,12 +752,13 @@ export default function NodeTransferBox({
 
   return (
     <Grid container spacing={2} sx={{ mt: 1 }}>
-      <Grid item xs={5}>
+      <Grid item xs={12} md={6} sx={{ flex: { md: '1 1 0%' }, minWidth: 0 }}>
         <Paper
           elevation={0}
           sx={{
             p: 2,
-            height: 380,
+            width: '100%',
+            height: 460,
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
@@ -669,19 +838,14 @@ export default function NodeTransferBox({
             </List>
             {availablePagination}
           </Box>
-        </Paper>
-      </Grid>
-
-      <Grid item xs={2} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Box sx={desktopActionStripSx}>
-          <Stack spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1} sx={{ mt: 1.25, flexShrink: 0 }}>
             <Button
               variant="contained"
               size="small"
               onClick={onAddChecked}
               disabled={checkedAvailable.length === 0}
               endIcon={<ChevronRightIcon />}
-              sx={desktopActionButtonSx('primary')}
+              sx={{ ...desktopActionButtonSx('primary'), minWidth: 0, flex: 1 }}
             >
               {t('subscriptions.transfer.add', { count: checkedAvailable.length })}
             </Button>
@@ -690,42 +854,21 @@ export default function NodeTransferBox({
               size="small"
               onClick={onAddAllVisible}
               endIcon={<ChevronRightIcon />}
-              sx={desktopSecondaryActionButtonSx('primary')}
+              sx={{ ...desktopSecondaryActionButtonSx('primary'), minWidth: 0, flex: 1 }}
             >
               {t('subscriptions.transfer.addAll')}
             </Button>
-            <Divider sx={{ width: '60%', my: 0.5, borderColor: panelBorder }} />
-            <Button
-              variant="outlined"
-              size="small"
-              color="error"
-              onClick={onRemoveAll}
-              startIcon={<ChevronLeftIcon />}
-              sx={desktopSecondaryActionButtonSx('error')}
-            >
-              {t('subscriptions.transfer.removeAll')}
-            </Button>
-            <Button
-              variant="contained"
-              size="small"
-              color="error"
-              onClick={onRemoveChecked}
-              disabled={checkedSelected.length === 0}
-              startIcon={<ChevronLeftIcon />}
-              sx={desktopActionButtonSx('error')}
-            >
-              {t('subscriptions.transfer.remove', { count: checkedSelected.length })}
-            </Button>
           </Stack>
-        </Box>
+        </Paper>
       </Grid>
 
-      <Grid item xs={5}>
+      <Grid item xs={12} md={6} sx={{ flex: { md: '1 1 0%' }, minWidth: 0 }}>
         <Paper
           elevation={0}
           sx={{
             p: 2,
-            height: 380,
+            width: '100%',
+            height: 460,
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
@@ -761,21 +904,7 @@ export default function NodeTransferBox({
               }}
             />
           </Stack>
-          <TextField
-            fullWidth
-            size="small"
-            placeholder={t('subscriptions.transfer.searchSelected')}
-            value={selectedNodeSearch}
-            onChange={handleSelectedNodeSearchChange}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon fontSize="small" color="action" />
-                </InputAdornment>
-              )
-            }}
-            sx={{ ...searchFieldSx, mb: 1 }}
-          />
+          <Box sx={{ flexShrink: 0 }}>{renderSelectedFilters()}</Box>
           <Box sx={{ flexGrow: 1, overflow: 'auto', pr: 1 }}>
             <List dense sx={{ ...listSurfaceSx, p: 1 }}>
               {filteredSelectedNodes.map((node) => (
@@ -833,10 +962,33 @@ export default function NodeTransferBox({
             </List>
             {filteredSelectedNodes.length === 0 && (
               <Typography color="text.secondary" align="center" sx={{ py: 4 }}>
-                {selectedNodeSearch ? t('subscriptions.transfer.noMatch') : t('subscriptions.transfer.noSelected')}
+                {selectedFilterActive ? t('subscriptions.transfer.noMatch') : t('subscriptions.transfer.noSelected')}
               </Typography>
             )}
           </Box>
+          <Stack direction="row" spacing={1} sx={{ mt: 1.25, flexShrink: 0 }}>
+            <Button
+              variant="outlined"
+              size="small"
+              color="error"
+              onClick={onRemoveAll}
+              startIcon={<ChevronLeftIcon />}
+              sx={{ ...desktopSecondaryActionButtonSx('error'), minWidth: 0, flex: 1 }}
+            >
+              {t('subscriptions.transfer.removeAll')}
+            </Button>
+            <Button
+              variant="contained"
+              size="small"
+              color="error"
+              onClick={onRemoveChecked}
+              disabled={checkedSelected.length === 0}
+              startIcon={<ChevronLeftIcon />}
+              sx={{ ...desktopActionButtonSx('error'), minWidth: 0, flex: 1 }}
+            >
+              {t('subscriptions.transfer.remove', { count: checkedSelected.length })}
+            </Button>
+          </Stack>
         </Paper>
       </Grid>
     </Grid>

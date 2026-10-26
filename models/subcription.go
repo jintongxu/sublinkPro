@@ -689,6 +689,27 @@ func (sub *Subcription) ApplyFilters(nodes []Node) []Node {
 }
 
 // 读取订阅
+// ParseExplicitNodeIDs returns the node IDs the user selected directly, before
+// front/dialer dependencies were expanded. An empty or malformed value yields an
+// empty set so callers fall back to dependency-based behaviour.
+func ParseExplicitNodeIDs(raw string) map[int]struct{} {
+	result := make(map[int]struct{})
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return result
+	}
+	var ids []int
+	if err := json.Unmarshal([]byte(trimmed), &ids); err != nil {
+		return result
+	}
+	for _, id := range ids {
+		if id > 0 {
+			result[id] = struct{}{}
+		}
+	}
+	return result
+}
+
 func (sub *Subcription) GetSub(clientType string) error {
 	// 定义节点排序项结构
 	type NodeSortItem struct {

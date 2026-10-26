@@ -813,6 +813,14 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 	// ========== 第二阶段：遍历节点生成配置 ==========
 	preserveClashExtra := prepared.ClientType == "clash" || prepared.ClientType == "mihomo"
 	// 前置节点仍需写入 proxies 定义以供 dialer-proxy 引用，但不加入自动生成的代理组。
+	// 被用户显式选中的节点例外：用户主动选了它，就应当在代理组里可见。
+	explicitNodeIDs := models.ParseExplicitNodeIDs(sub.ExplicitNodeIDs)
+	explicitProxyNames := make(map[string]bool, len(explicitNodeIDs))
+	for idx, v := range sub.Nodes {
+		if _, isExplicit := explicitNodeIDs[v.ID]; isExplicit {
+			explicitProxyNames[nodeNamePlan.NodeNameAt(idx, v.ID)] = true
+		}
+	}
 	excludedProxyNames := make(map[string]bool)
 	for _, v := range sub.Nodes {
 		if strings.TrimSpace(v.DialerProxyName) == "" {
@@ -820,7 +828,7 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 		}
 		for _, name := range strings.Split(v.DialerProxyName, ",") {
 			name = strings.TrimSpace(name)
-			if name != "" {
+			if name != "" && !explicitProxyNames[name] {
 				excludedProxyNames[name] = true
 			}
 		}
@@ -832,7 +840,7 @@ func buildPreparedMihomoYAML(c *gin.Context, prepared preparedClientResponse) (m
 		// 使用最终名称重写链接，确保 proxy.name 与代理组、dialer-proxy 引用一致。
 		nodeLink := utils.RenameNodeLink(v.Link, finalNodeName)
 		dialerProxy := resolveClashDialerProxy(v, finalNodeName, chainNodeDialerMap, targetNodeDialerMap, dialerProxyNameMap)
-		if dialerProxy != "" {
+		if dialerProxy != "" && !explicitProxyNames[dialerProxy] {
 			excludedProxyNames[dialerProxy] = true
 		}
 

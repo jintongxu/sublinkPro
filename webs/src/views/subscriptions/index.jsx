@@ -195,6 +195,9 @@ export default function SubscriptionList() {
   const [checkedSelected, setCheckedSelected] = useState([]);
   const [mobileTab, setMobileTab] = useState(0);
   const [selectedNodeSearch, setSelectedNodeSearch] = useState('');
+  const [selectedNodeGroupFilter, setSelectedNodeGroupFilter] = useState('all');
+  const [selectedNodeSourceFilter, setSelectedNodeSourceFilter] = useState('all');
+  const [selectedNodeFrontOnly, setSelectedNodeFrontOnly] = useState(false);
   const [namingMode, setNamingMode] = useState('builder');
 
   const [availableNodes, setAvailableNodes] = useState([]);
@@ -285,28 +288,13 @@ export default function SubscriptionList() {
     return items;
   }, [hydrateSelectedNodeMap, nodeCatalog]);
 
+  // 旧订阅没有持久化 ExplicitNodeIDs 时，只能从已存节点反推根节点。
+  // 仅凭“被当作前置引用”无法断定它非用户所选：用户完全可能既选了前置、又选了它的落地。
+  // 因此只在能证明依赖是自动展开的情况下才剔除（即前置本身未被其他节点引用时不可靠），
+  // 保守做法是保留全部节点作为根，宁可多显示也不丢用户的选择。
   const deriveExplicitNodeIds = useCallback((nodes) => {
     const items = Array.isArray(nodes) ? nodes : [];
-    const aliasToIds = new Map();
-    items.forEach((node) => {
-      [node.EffectiveName, node.Name, node.LinkName].filter(Boolean).forEach((name) => {
-        const key = name.trim();
-        if (!key) return;
-        const ids = aliasToIds.get(key) || new Set();
-        ids.add(Number(node.ID));
-        aliasToIds.set(key, ids);
-      });
-    });
-    const dependencyIds = new Set();
-    items.forEach((node) => {
-      const nodeId = Number(node.ID);
-      const proxyName = node.DialerProxyName?.trim();
-      const matches = proxyName ? aliasToIds.get(proxyName) : null;
-      const distinctMatches = matches ? new Set([...matches].filter((id) => id !== nodeId)) : new Set();
-      if (distinctMatches.size === 1) dependencyIds.add([...distinctMatches][0]);
-    });
-    const roots = items.map((node) => Number(node.ID)).filter((id) => !dependencyIds.has(id));
-    return roots.length > 0 ? roots : items.map((node) => Number(node.ID));
+    return items.map((node) => Number(node.ID)).filter((id) => Number.isInteger(id) && id > 0);
   }, []);
 
   const fetchNodeSelector = useCallback(async () => {
@@ -949,6 +937,20 @@ export default function SubscriptionList() {
     return explicitNodeIds.map((id) => selectedNodeMap[id]).filter(Boolean);
   }, [explicitNodeIds, selectedNodeMap]);
 
+  // 代理组分配候选需要包含自动展开的前置依赖节点，否则无法把前置节点放进代理组。
+  const assignmentNodesList = useMemo(() => {
+    const seen = new Set();
+    return (formData.selectedNodes || [])
+      .map((id) => selectedNodeMap[Number(id)])
+      .filter((node) => {
+        if (!node) return false;
+        const id = Number(node.ID);
+        if (!Number.isInteger(id) || id <= 0 || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+  }, [formData.selectedNodes, selectedNodeMap]);
+
   const expandNodeDependencies = useCallback(
     async (rootIds) => {
       const catalog = await fetchNodeCatalog();
@@ -1531,11 +1533,18 @@ export default function SubscriptionList() {
         selectorNodesTotal={availableNodeCount}
         selectorNodesLoading={availableNodesLoading}
         selectedNodesList={selectedNodesList}
+        assignmentNodesList={assignmentNodesList}
         availableNodePage={availableNodePage}
         availableNodePageCount={Math.max(1, Math.ceil(availableNodesTotal / 100))}
         onAvailableNodePageChange={setAvailableNodePage}
         selectedNodeSearch={selectedNodeSearch}
         setSelectedNodeSearch={setSelectedNodeSearch}
+        selectedNodeGroupFilter={selectedNodeGroupFilter}
+        setSelectedNodeGroupFilter={setSelectedNodeGroupFilter}
+        selectedNodeSourceFilter={selectedNodeSourceFilter}
+        setSelectedNodeSourceFilter={setSelectedNodeSourceFilter}
+        selectedNodeFrontOnly={selectedNodeFrontOnly}
+        setSelectedNodeFrontOnly={setSelectedNodeFrontOnly}
         groupNodeCounts={groupNodeCounts}
         allNodeTotal={allNodeTotal}
         groupOptions={groupOptions}

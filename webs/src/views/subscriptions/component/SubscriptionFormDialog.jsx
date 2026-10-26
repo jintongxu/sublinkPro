@@ -103,6 +103,7 @@ export default function SubscriptionFormDialog({
   availableNodePageCount,
   onAvailableNodePageChange,
   selectedNodesList,
+  assignmentNodesList,
   groupNodeCounts,
   allNodeTotal,
   groupOptions,
@@ -124,6 +125,12 @@ export default function SubscriptionFormDialog({
   setMobileTab,
   selectedNodeSearch,
   setSelectedNodeSearch,
+  selectedNodeGroupFilter = 'all',
+  setSelectedNodeGroupFilter = () => {},
+  selectedNodeSourceFilter = 'all',
+  setSelectedNodeSourceFilter = () => {},
+  selectedNodeFrontOnly = false,
+  setSelectedNodeFrontOnly = () => {},
   namingMode,
   setNamingMode,
   onClose,
@@ -159,6 +166,8 @@ export default function SubscriptionFormDialog({
   const [assignmentNodeSearch, setAssignmentNodeSearch] = useState('');
   const [assignmentNodeGroupFilter, setAssignmentNodeGroupFilter] = useState('all');
   const [assignmentNodeSourceFilter, setAssignmentNodeSourceFilter] = useState('all');
+  // 仅记录当前编辑会话中点击“完成”后确认的组内节点顺序。
+  const [assignmentGroupOrder, setAssignmentGroupOrder] = useState({});
 
   const [expandedPanels, setExpandedPanels] = useState({
     basic: true,
@@ -326,13 +335,17 @@ export default function SubscriptionFormDialog({
 
   const assignmentCandidateNodes = useMemo(() => {
     const seen = new Set();
-    return (selectedNodesList || []).filter((node) => {
+    const source = (assignmentNodesList || []).length > 0 ? assignmentNodesList : selectedNodesList;
+    return (source || []).filter((node) => {
       const id = Number(node.ID);
       if (!Number.isInteger(id) || id <= 0 || seen.has(id)) return false;
       seen.add(id);
       return true;
     });
-  }, [selectedNodesList]);
+  }, [assignmentNodesList, selectedNodesList]);
+
+  // 自动展开的前置依赖节点不属于用户显式选择的节点，但仍可手动分配到代理组。
+  const explicitAssignmentNodeIds = useMemo(() => new Set((selectedNodesList || []).map((node) => Number(node.ID))), [selectedNodesList]);
 
   const assignmentNodeGroupOptions = useMemo(
     () => Array.from(new Set(assignmentCandidateNodes.map((node) => String(node.Group || '')).filter(Boolean))).sort(),
@@ -355,6 +368,26 @@ export default function SubscriptionFormDialog({
     });
   }, [assignmentCandidateNodes, assignmentNodeGroupFilter, assignmentNodeSearch, assignmentNodeSourceFilter]);
 
+  // 完成确认后再次打开同一组时，把已确认节点排在未选节点前面。
+  // 未点击“完成”前只更新 draft，不改变这里的排序结果。
+  const assignmentDisplayNodes = useMemo(() => {
+    const selectedIds = new Set(assignmentDraftNodeIds.map(Number));
+    const confirmedOrder = assignmentGroupOrder[assignmentMenuGroup] || [];
+    const confirmedSet = new Set(confirmedOrder.map(Number));
+    const orderIndex = new Map(confirmedOrder.map((id, index) => [Number(id), index]));
+    return [...assignmentFilteredNodes].sort((left, right) => {
+      const leftId = Number(left.ID);
+      const rightId = Number(right.ID);
+      const leftConfirmedSelected = selectedIds.has(leftId) && confirmedSet.has(leftId);
+      const rightConfirmedSelected = selectedIds.has(rightId) && confirmedSet.has(rightId);
+      if (leftConfirmedSelected !== rightConfirmedSelected) return leftConfirmedSelected ? -1 : 1;
+      if (leftConfirmedSelected && rightConfirmedSelected) {
+        return (orderIndex.get(leftId) ?? Number.MAX_SAFE_INTEGER) - (orderIndex.get(rightId) ?? Number.MAX_SAFE_INTEGER);
+      }
+      return 0;
+    });
+  }, [assignmentDraftNodeIds, assignmentFilteredNodes, assignmentGroupOrder, assignmentMenuGroup]);
+
   const assignedNodeIdsForGroup = (groupName) =>
     assignmentCandidateNodes
       .filter((node) => {
@@ -363,6 +396,29 @@ export default function SubscriptionFormDialog({
         return groups.includes(groupName);
       })
       .map((node) => Number(node.ID));
+
+  const orderedAssignedNodeIdsForGroup = (groupName) => {
+    const assignedIds = assignedNodeIdsForGroup(groupName);
+    const assignedSet = new Set(assignedIds);
+    const remembered = assignmentGroupOrder[groupName] || [];
+    return [...remembered.filter((id) => assignedSet.has(Number(id))).map(Number), ...assignedIds.filter((id) => !remembered.includes(id))];
+  };
+
+  const assignedGroupNamesForNode = (nodeId) => {
+    const rawGroups = formData.nodeTemplateAssignments?.[String(nodeId)];
+    return (Array.isArray(rawGroups) ? rawGroups : rawGroups ? [rawGroups] : []).filter(Boolean);
+  };
+
+  const removeNodeFromGroup = (nodeId, groupName) => {
+    setFormData((prev) => {
+      const next = { ...(prev.nodeTemplateAssignments || {}) };
+      const key = String(nodeId);
+      const remaining = assignedGroupNamesForNode(nodeId).filter((name) => name !== groupName);
+      if (remaining.length > 0) next[key] = remaining;
+      else delete next[key];
+      return { ...prev, nodeTemplateAssignments: next };
+    });
+  };
 
   const closeAssignmentMenu = () => {
     setAssignmentMenuGroup(null);
@@ -387,6 +443,7 @@ export default function SubscriptionFormDialog({
       });
       return { ...prev, nodeTemplateAssignments: next };
     });
+    setAssignmentGroupOrder((current) => ({ ...current, [assignmentMenuGroup]: Array.from(selected) }));
     closeAssignmentMenu();
   };
 
@@ -960,6 +1017,12 @@ export default function SubscriptionFormDialog({
                       checkedSelected={checkedSelected}
                       selectedNodeSearch={selectedNodeSearch}
                       onSelectedNodeSearchChange={setSelectedNodeSearch}
+                      selectedNodeGroupFilter={selectedNodeGroupFilter}
+                      onSelectedNodeGroupFilterChange={setSelectedNodeGroupFilter}
+                      selectedNodeSourceFilter={selectedNodeSourceFilter}
+                      onSelectedNodeSourceFilterChange={setSelectedNodeSourceFilter}
+                      selectedNodeFrontOnly={selectedNodeFrontOnly}
+                      onSelectedNodeFrontOnlyChange={setSelectedNodeFrontOnly}
                       selectorNodesTotal={selectorNodesCount}
                       selectorNodesLoading={selectorNodesLoading}
                       availableNodePage={availableNodePage}
@@ -1033,15 +1096,16 @@ export default function SubscriptionFormDialog({
                         {formData.enableNodeTemplateAssignments && (
                           <Alert severity="info" variant="outlined" sx={{ my: 1.5, py: 0.25 }}>
                             新增节点不会自动加入代理组，需要时可在下方按代理组手动选择。已有节点的分配保持不变，自动展开的前置依赖由链式代理管理。
-                            {Math.max(0, formData.selectedNodes.length - assignmentCandidateNodes.length) > 0 &&
-                              ` 当前有 ${formData.selectedNodes.length - assignmentCandidateNodes.length} 个前置依赖不会出现在候选列表中。`}
+                            前置依赖节点同样出现在候选列表中并标记为「前置依赖」；把前置节点分配到某个代理组后，只有该组会保留它，其它代理组仍会排除前置节点。
                           </Alert>
                         )}
                         {formData.enableNodeTemplateAssignments && (
                           <Stack spacing={1}>
                             {clashProxyGroupMetadata.map((group) => {
                               const groupName = group.name;
-                              const assignedNodeIds = assignedNodeIdsForGroup(groupName);
+                              const assignedNodeIds = orderedAssignedNodeIdsForGroup(groupName);
+                              const nodeById = new Map(assignmentCandidateNodes.map((node) => [Number(node.ID), node]));
+                              const assignedNodes = assignedNodeIds.map((id) => nodeById.get(id)).filter(Boolean);
                               return (
                                 <Stack
                                   key={groupName}
@@ -1072,6 +1136,42 @@ export default function SubscriptionFormDialog({
                                     <Typography variant="caption" sx={{ color: tertiaryText, display: 'block' }}>
                                       直接分配 {assignedNodeIds.length} / {assignmentCandidateNodes.length} 个节点
                                     </Typography>
+                                    {assignedNodes.length > 0 && (
+                                      <Stack
+                                        direction="row"
+                                        spacing={0.5}
+                                        useFlexGap
+                                        flexWrap="wrap"
+                                        sx={{
+                                          mt: 0.75,
+                                          maxHeight: 76,
+                                          overflowY: 'auto',
+                                          scrollbarWidth: 'thin',
+                                          scrollbarColor: `${withAlpha(palette.text.primary, 0.28)} transparent`,
+                                          '&::-webkit-scrollbar': { width: 6 },
+                                          '&::-webkit-scrollbar-thumb': {
+                                            backgroundColor: withAlpha(palette.text.primary, 0.24),
+                                            borderRadius: 999
+                                          }
+                                        }}
+                                      >
+                                        {assignedNodes.map((node) => {
+                                          const nodeId = Number(node.ID);
+                                          const nodeName = node.Name || node.EffectiveName || `Node #${nodeId}`;
+                                          return (
+                                            <Tooltip key={nodeId} title={nodeName} arrow>
+                                              <Chip
+                                                size="small"
+                                                color="primary"
+                                                variant="outlined"
+                                                label={nodeName}
+                                                sx={{ maxWidth: 180, '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }}
+                                              />
+                                            </Tooltip>
+                                          );
+                                        })}
+                                      </Stack>
+                                    )}
                                   </Box>
                                   <Stack direction="row" spacing={1} alignItems="center">
                                     {assignedNodeIds.length > 0 && (
@@ -1082,6 +1182,9 @@ export default function SubscriptionFormDialog({
                                       variant={assignedNodeIds.length > 0 ? 'contained' : 'outlined'}
                                       onClick={(event) => {
                                         setAssignmentMenuGroup(groupName);
+                                        setAssignmentGroupOrder((current) =>
+                                          current[groupName] ? current : { ...current, [groupName]: assignedNodeIds }
+                                        );
                                         setAssignmentDraftNodeIds(assignedNodeIds);
                                         setAssignmentNodeSearch('');
                                         setAssignmentNodeGroupFilter('all');
@@ -1096,6 +1199,86 @@ export default function SubscriptionFormDialog({
                               );
                             })}
                           </Stack>
+                        )}
+                        {formData.enableNodeTemplateAssignments && (
+                          <Box sx={{ mt: 2 }}>
+                            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                              <Typography variant="subtitle2" sx={{ color: primaryText }}>
+                                {t('subscriptions.form.nodes.selectedList', { count: assignmentCandidateNodes.length })}
+                              </Typography>
+                              <Chip
+                                size="small"
+                                variant="outlined"
+                                color="success"
+                                label={assignmentCandidateNodes.filter((node) => assignedGroupNamesForNode(node.ID).length > 0).length}
+                              />
+                            </Stack>
+                            <Box
+                              sx={{
+                                maxHeight: 220,
+                                overflowY: 'auto',
+                                p: 1,
+                                border: '1px solid',
+                                borderColor: panelBorder,
+                                borderRadius: 1.5,
+                                bgcolor: mutedPanelSurface
+                              }}
+                            >
+                              {assignmentCandidateNodes.map((node) => {
+                                const nodeId = Number(node.ID);
+                                const nodeGroups = assignedGroupNamesForNode(nodeId);
+                                return (
+                                  <Stack
+                                    key={nodeId}
+                                    direction="row"
+                                    spacing={1}
+                                    alignItems="center"
+                                    sx={{ py: 0.5, px: 0.75, borderRadius: 1, '&:hover': { bgcolor: nestedPanelSurface } }}
+                                  >
+                                    <Typography variant="body2" noWrap sx={{ color: primaryText, minWidth: 0, flex: '0 1 40%' }}>
+                                      {node.Name || node.EffectiveName || `Node #${nodeId}`}
+                                    </Typography>
+                                    <Stack
+                                      direction="row"
+                                      spacing={0.5}
+                                      alignItems="center"
+                                      sx={{ flex: '1 1 60%', flexWrap: 'wrap', rowGap: 0.5 }}
+                                    >
+                                      {!explicitAssignmentNodeIds.has(nodeId) && (
+                                        <Chip
+                                          size="small"
+                                          variant="outlined"
+                                          color="secondary"
+                                          label={t('subscriptions.form.nodes.frontDependency')}
+                                        />
+                                      )}
+                                      {nodeGroups.length > 0 ? (
+                                        nodeGroups.map((groupName) => (
+                                          <Chip
+                                            key={groupName}
+                                            size="small"
+                                            color="primary"
+                                            variant="outlined"
+                                            label={groupName}
+                                            onDelete={() => removeNodeFromGroup(nodeId, groupName)}
+                                          />
+                                        ))
+                                      ) : (
+                                        <Typography variant="caption" sx={{ color: tertiaryText }}>
+                                          {t('subscriptions.form.nodes.unassigned')}
+                                        </Typography>
+                                      )}
+                                    </Stack>
+                                  </Stack>
+                                );
+                              })}
+                              {assignmentCandidateNodes.length === 0 && (
+                                <Typography variant="body2" sx={{ p: 2, textAlign: 'center', color: secondaryText }}>
+                                  {t('subscriptions.form.nodes.selectedListEmpty')}
+                                </Typography>
+                              )}
+                            </Box>
+                          </Box>
                         )}
                         <Popover
                           open={Boolean(formData.enableNodeTemplateAssignments && assignmentMenuGroup && assignmentMenuAnchor)}
@@ -1176,7 +1359,8 @@ export default function SubscriptionFormDialog({
                             </Stack>
                             <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
                               <Typography variant="caption" sx={{ color: secondaryText, flex: 1 }}>
-                                当前显示 {assignmentFilteredNodes.length} / {assignmentCandidateNodes.length} 个节点
+                                当前显示 {assignmentDisplayNodes.length} / {assignmentCandidateNodes.length} 个节点 · 已选{' '}
+                                {assignmentDraftNodeIds.length} 个
                               </Typography>
                               <Button
                                 size="small"
@@ -1209,7 +1393,7 @@ export default function SubscriptionFormDialog({
                               }
                             }}
                           >
-                            {assignmentFilteredNodes.map((node) => {
+                            {assignmentDisplayNodes.map((node) => {
                               const nodeId = Number(node.ID);
                               const checked = assignmentDraftNodeIds.includes(nodeId);
                               return (
@@ -1233,6 +1417,9 @@ export default function SubscriptionFormDialog({
                                         <Typography variant="caption" sx={{ color: tertiaryText }}>
                                           {node.Group}
                                         </Typography>
+                                      )}
+                                      {!explicitAssignmentNodeIds.has(nodeId) && (
+                                        <Chip size="small" variant="outlined" color="secondary" label="前置依赖" />
                                       )}
                                       {node.DialerProxyName && (
                                         <Chip size="small" variant="outlined" color="warning" label={`经前置：${node.DialerProxyName}`} />

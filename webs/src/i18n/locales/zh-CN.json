@@ -2869,7 +2869,10 @@
       "loading": "节点列表加载中...",
       "noMatch": "未找到匹配的节点",
       "noSelected": "暂无已选节点",
-      "airportSource": "机场：{{source}}"
+      "airportSource": "机场：{{source}}",
+      "frontOnly": "仅看前置节点",
+      "filteredCount": "显示 {{shown}} / {{total}}",
+      "resetFilters": "重置筛选"
     },
     "clientUrls": {
       "defaultTitle": "客户端（点击二维码获取地址）",
@@ -3200,7 +3203,13 @@
         "confirm": "确定"
       },
       "nodes": {
-        "loading": "节点加载中..."
+        "loading": "节点加载中...",
+        "selectedList": "已选节点 ({{count}})",
+        "selectedListEmpty": "还没有选择节点",
+        "frontDependency": "前置依赖",
+        "groupOnlyFront": "仅含前置节点",
+        "unassigned": "未分配",
+        "moreNodes": "+{{count}} 个"
       }
     }
   },
